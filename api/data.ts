@@ -1,41 +1,66 @@
-
 import { MongoClient } from 'mongodb';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const uri = process.env.MONGODB_STRING;
-const client = new MongoClient(uri || '');
+let cachedClient: MongoClient | null = null;
 
-let cachedDb: any = null;
-
-async function connectToDatabase() {
-  if (cachedDb) return cachedDb;
+async function getMongoClient() {
+  if (cachedClient) return cachedClient;
+  if (!uri) throw new Error('MONGODB_STRING environment variable is not set');
+  
+  const client = new MongoClient(uri, {
+    connectTimeoutMS: 5000,
+    socketTimeoutMS: 5000,
+    serverSelectionTimeoutMS: 5000,
+  });
+  
   await client.connect();
-  const db = client.db('divitrack');
-  cachedDb = db;
-  return db;
+  cachedClient = client;
+  return client;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (!uri) {
-    return res.status(500).json({ error: 'MONGODB_STRING environment variable is not set' });
+  // Set common headers for API responses
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
   }
 
   try {
-    const db = await connectToDatabase();
+    const client = await getMongoClient();
+    const db = client.db('divitrack');
     const collection = db.collection('portfolio');
 
     if (req.method === 'GET') {
-      // For this app, we manage a single global portfolio record
-      const data = await collection.findOne({ _id: 'master_portfolio' });
-      return res.status(200).json(data || { stocks: [], dividends: [] });
+      try {
+        const data = await collection.findOne({ _id: 'master_portfolio' });
+        return res.status(200).json(data || { stocks: [], dividends: [] });
+      } catch (err) {
+        // Fallback for fresh databases
+        return res.status(200).json({ stocks: [], dividends: [] });
+      }
     } 
     
     if (req.method === 'POST') {
-      const payload = JSON.parse(req.body);
-      // Clean the payload to ensure it matches our state structure
+      let payload = req.body;
+      
+      // Vercel might pass body as string or object depending on deployment config
+      if (typeof payload === 'string') {
+        try {
+          payload = JSON.parse(payload);
+        } catch (e) {
+          return res.status(400).json({ error: 'Invalid JSON body' });
+        }
+      }
+
+      // Ensure consistent data structure
       const cleanedData = {
-        stocks: payload.stocks || [],
-        dividends: payload.dividends || []
+        stocks: Array.isArray(payload.stocks) ? payload.stocks : [],
+        dividends: Array.isArray(payload.dividends) ? payload.dividends : []
       };
       
       await collection.updateOne(
@@ -49,7 +74,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (error: any) {
-    console.error('DB Error:', error);
-    return res.status(500).json({ error: error.message });
+    console.error('API Error:', error);
+    // Send a structured error back so fetch doesn't hang indefinitely
+    return res.status(500).json({ 
+      error: 'Database connection failed', 
+      message: error.message 
+    });
   }
 }

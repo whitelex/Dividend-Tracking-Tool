@@ -13,9 +13,8 @@
     "lucide-react": "0.460.0",
     "recharts": "2.13.3",
     "react-dom": "^19.2.3",
-    "@google/genai": "^1.38.0",
-    "mongodb": "^7.0.0",
-    "@vercel/node": "^5.5.27"
+    "@vercel/node": "^5.5.27",
+    "mongodb": "^7.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
