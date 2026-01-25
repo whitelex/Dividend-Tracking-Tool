@@ -45,7 +45,8 @@ const App: React.FC = () => {
   const [passcodeInput, setPasscodeInput] = useState('');
   const [passcodeError, setPasscodeError] = useState('');
   // Ensure passcode is string and trim whitespace
-  const publicPasscode = ((window as any).__PUBLIC_PASSCODE__ || '').toString().trim();
+  // Use Vite env variable directly
+  const publicPasscode = (import.meta.env.VITE_PUBLIC_PASSCODE || '').toString().trim();
 
   useEffect(() => {
     if (passcode && passcode === publicPasscode) {
@@ -89,6 +90,7 @@ const App: React.FC = () => {
           <div className="text-xs text-slate-400 mt-4 select-all">
             {/* Debug info for troubleshooting, remove in production */}
             <div>Env passcode: <span style={{fontFamily:'monospace'}}>{publicPasscode || '(empty)'}</span></div>
+            <div>Build time: {new Date().toISOString()}</div>
           </div>
         </div>
       </div>
