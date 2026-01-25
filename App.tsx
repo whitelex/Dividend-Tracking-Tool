@@ -1,5 +1,14 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+// Passcode gate helpers
+const getStoredPasscode = () => {
+  try {
+    return localStorage.getItem('divitrack_passcode') || '';
+  } catch { return ''; }
+};
+const setStoredPasscode = (val: string) => {
+  try { localStorage.setItem('divitrack_passcode', val); } catch {}
+};
 import { 
   TrendingUp, 
   Wallet, 
@@ -32,6 +41,54 @@ import { Stock, Dividend, PortfolioState, ChartData, DividendMonthData, Purchase
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
 const App: React.FC = () => {
+  const [passcode, setPasscode] = useState(getStoredPasscode());
+  const [passcodeInput, setPasscodeInput] = useState('');
+  const [passcodeError, setPasscodeError] = useState('');
+  const publicPasscode = (window as any).__PUBLIC_PASSCODE__ || '';
+
+  useEffect(() => {
+    if (passcode && passcode === publicPasscode) {
+      setStoredPasscode(passcode);
+    }
+  }, [passcode, publicPasscode]);
+
+  if (!passcode || passcode !== publicPasscode) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-100">
+        <div className="bg-white p-8 rounded-3xl shadow-xl max-w-xs w-full flex flex-col items-center">
+          <h2 className="text-xl font-bold mb-4 text-indigo-700">Enter Access Passcode</h2>
+          <input
+            type="password"
+            className="w-full px-4 py-3 rounded-xl border border-slate-200 mb-3 text-center text-lg"
+            placeholder="Passcode"
+            value={passcodeInput}
+            onChange={e => { setPasscodeInput(e.target.value); setPasscodeError(''); }}
+            onKeyDown={e => { if (e.key === 'Enter') {
+              if (passcodeInput === publicPasscode) {
+                setPasscode(passcodeInput);
+                setPasscodeError('');
+              } else {
+                setPasscodeError('Incorrect passcode');
+              }
+            }}}
+            autoFocus
+          />
+          <button
+            className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold text-sm mt-2 hover:bg-indigo-700 transition-all"
+            onClick={() => {
+              if (passcodeInput === publicPasscode) {
+                setPasscode(passcodeInput);
+                setPasscodeError('');
+              } else {
+                setPasscodeError('Incorrect passcode');
+              }
+            }}
+          >Access</button>
+          {passcodeError && <div className="text-red-500 text-xs mt-2">{passcodeError}</div>}
+        </div>
+      </div>
+    );
+  }
   const [portfolio, setPortfolio] = useState<PortfolioState>({ stocks: [], dividends: [] });
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'loading' | 'saving' | 'saved' | 'error'>('loading');

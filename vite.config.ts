@@ -14,4 +14,7 @@ export default defineConfig({
       },
     },
   },
+  define: {
+    'import.meta.env.VITE_PUBLIC_PASSCODE': JSON.stringify(process.env.VITE_PUBLIC_PASSCODE || ''),
+  },
 });
