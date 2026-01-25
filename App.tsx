@@ -27,7 +27,7 @@ import {
   Tooltip, 
   Legend 
 } from 'recharts';
-import { Stock, Dividend, PortfolioState, ChartData, DividendMonthData, Purchase } from './types';
+import { Stock, Dividend, PortfolioState, ChartData, DividendMonthData, Purchase } from './types.ts';
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
@@ -40,11 +40,9 @@ const App: React.FC = () => {
   const [isDivModalOpen, setIsDivModalOpen] = useState(false);
   const [expandedStockId, setExpandedStockId] = useState<string | null>(null);
 
-  // Form states
   const [newPurchase, setNewPurchase] = useState({ ticker: '', shares: 0, price: 0, date: new Date().toISOString().split('T')[0] });
   const [newDiv, setNewDiv] = useState({ stockId: '', amount: 0, date: new Date().toISOString().split('T')[0] });
 
-  // Load from MongoDB on mount
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -63,7 +61,6 @@ const App: React.FC = () => {
     fetchData();
   }, []);
 
-  // Sync to MongoDB on changes (with debounce)
   const saveTimeoutRef = useRef<number | null>(null);
   useEffect(() => {
     if (isInitialLoad) return;
@@ -90,7 +87,6 @@ const App: React.FC = () => {
     };
   }, [portfolio, isInitialLoad]);
 
-  // Derived Statistics
   const stockStats = useMemo(() => {
     return portfolio.stocks.map(stock => {
       const totalShares = stock.purchases.reduce((sum, p) => sum + p.shares, 0);
@@ -138,7 +134,6 @@ const App: React.FC = () => {
       .map(([month, amount]) => ({ month, amount }));
   }, [portfolio.dividends]);
 
-  // Handlers
   const handleAddPurchase = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPurchase.ticker || newPurchase.shares <= 0) return;
@@ -211,14 +206,12 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 pb-12">
-      {/* Header */}
       <nav className="bg-indigo-700 text-white p-4 shadow-xl sticky top-0 z-40">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <div className="flex items-center space-x-2">
             <TrendingUp className="h-8 w-8 text-indigo-200" />
             <h1 className="text-2xl font-bold tracking-tight">DiviTrack <span className="text-indigo-200">Pro</span></h1>
             
-            {/* Sync Status Pill */}
             <div className={`ml-4 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center transition-colors ${
               syncStatus === 'saved' ? 'bg-indigo-600 text-indigo-100' : 
               syncStatus === 'saving' || syncStatus === 'loading' ? 'bg-indigo-500 text-white' : 
@@ -257,7 +250,6 @@ const App: React.FC = () => {
         </div>
       ) : (
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 animate-in fade-in duration-700">
-          {/* Dashboard Stats */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Portfolio Value</p>
@@ -279,7 +271,6 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          {/* Charts Section */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
               <h2 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
@@ -337,7 +328,6 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          {/* Holdings Table */}
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
             <div className="xl:col-span-2">
               <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
@@ -434,7 +424,6 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Side Panel: Recent Divs */}
             <div className="space-y-6">
               <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6">
                 <h2 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
@@ -465,7 +454,6 @@ const App: React.FC = () => {
         </main>
       )}
 
-      {/* Modals (Same as before) */}
       {isStockModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md animate-in zoom-in-95 duration-200 p-8">
