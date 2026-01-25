@@ -30,6 +30,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
+    // If no DB configured, serve empty data for GET to avoid frontend breaking
+    if (req.method === 'GET' && !uri) {
+      return res.status(200).json({ stocks: [], dividends: [] });
+    }
+
     const client = await getMongoClient();
     const db = client.db('divitrack');
     // Using <any> to prevent TS error when using a string for _id
