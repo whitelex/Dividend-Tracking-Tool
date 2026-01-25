@@ -36,7 +36,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const client = await getMongoClient();
-    const db = client.db('divitrack');
+    // Use the database from the connection string or environment variable if available
+    const db = client.db(process.env.MONGODB_DB_NAME || undefined);
     // Using <any> to prevent TS error when using a string for _id
     const collection = db.collection<any>('portfolio');
 
