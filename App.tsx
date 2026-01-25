@@ -54,48 +54,6 @@ const App: React.FC = () => {
     }
   }, [passcode, publicPasscode]);
 
-  if (!passcode || passcode.trim() !== publicPasscode) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-100">
-        <div className="bg-white p-8 rounded-3xl shadow-xl max-w-xs w-full flex flex-col items-center">
-          <h2 className="text-xl font-bold mb-4 text-indigo-700">Enter Access Passcode</h2>
-          <input
-            type="password"
-            className="w-full px-4 py-3 rounded-xl border border-slate-200 mb-3 text-center text-lg"
-            placeholder="Passcode"
-            value={passcodeInput}
-            onChange={e => { setPasscodeInput(e.target.value); setPasscodeError(''); }}
-            onKeyDown={e => { if (e.key === 'Enter') {
-              if (passcodeInput.trim() === publicPasscode) {
-                setPasscode(passcodeInput.trim());
-                setPasscodeError('');
-              } else {
-                setPasscodeError('Incorrect passcode');
-              }
-            }}}
-            autoFocus
-          />
-          <button
-            className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold text-sm mt-2 hover:bg-indigo-700 transition-all"
-            onClick={() => {
-              if (passcodeInput.trim() === publicPasscode) {
-                setPasscode(passcodeInput.trim());
-                setPasscodeError('');
-              } else {
-                setPasscodeError('Incorrect passcode');
-              }
-            }}
-          >Access</button>
-          {passcodeError && <div className="text-red-500 text-xs mt-2">{passcodeError}</div>}
-          <div className="text-xs text-slate-400 mt-4 select-all">
-            {/* Debug info for troubleshooting, remove in production */}
-            <div>Env passcode: <span style={{fontFamily:'monospace'}}>{publicPasscode || '(empty)'}</span></div>
-            <div>Build time: {new Date().toISOString()}</div>
-          </div>
-        </div>
-      </div>
-    );
-  }
   const [portfolio, setPortfolio] = useState<PortfolioState>({ stocks: [], dividends: [] });
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'loading' | 'saving' | 'saved' | 'error'>('loading');
@@ -107,8 +65,12 @@ const App: React.FC = () => {
   const [newPurchase, setNewPurchase] = useState({ ticker: '', shares: 0, price: 0, date: new Date().toISOString().split('T')[0] });
   const [newDiv, setNewDiv] = useState({ stockId: '', amount: 0, date: new Date().toISOString().split('T')[0] });
 
+  // Move hooks before any conditional return
   useEffect(() => {
     const fetchData = async () => {
+      // Don't fetch if locked
+      if (!passcode || passcode.trim() !== publicPasscode) return;
+      
       try {
         const response = await fetch('/api/data');
         if (!response.ok) throw new Error('Failed to fetch');
@@ -123,11 +85,12 @@ const App: React.FC = () => {
       }
     };
     fetchData();
-  }, []);
+  }, [passcode, publicPasscode]);
 
   const saveTimeoutRef = useRef<number | null>(null);
   useEffect(() => {
     if (isInitialLoad) return;
+    if (!passcode || passcode.trim() !== publicPasscode) return;
 
     setSyncStatus('saving');
     if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
@@ -152,7 +115,7 @@ const App: React.FC = () => {
     return () => {
       if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
     };
-  }, [portfolio, isInitialLoad]);
+  }, [portfolio, isInitialLoad, passcode, publicPasscode]);
 
   const stockStats = useMemo(() => {
     return portfolio.stocks.map(stock => {
@@ -200,6 +163,49 @@ const App: React.FC = () => {
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([month, amount]) => ({ month, amount }));
   }, [portfolio.dividends]);
+
+  if (!passcode || passcode.trim() !== publicPasscode) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-100">
+        <div className="bg-white p-8 rounded-3xl shadow-xl max-w-xs w-full flex flex-col items-center">
+          <h2 className="text-xl font-bold mb-4 text-indigo-700">Enter Access Passcode</h2>
+          <input
+            type="password"
+            className="w-full px-4 py-3 rounded-xl border border-slate-200 mb-3 text-center text-lg"
+            placeholder="Passcode"
+            value={passcodeInput}
+            onChange={e => { setPasscodeInput(e.target.value); setPasscodeError(''); }}
+            onKeyDown={e => { if (e.key === 'Enter') {
+              if (passcodeInput.trim() === publicPasscode) {
+                setPasscode(passcodeInput.trim());
+                setPasscodeError('');
+              } else {
+                setPasscodeError('Incorrect passcode');
+              }
+            }}}
+            autoFocus
+          />
+          <button
+            className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold text-sm mt-2 hover:bg-indigo-700 transition-all"
+            onClick={() => {
+              if (passcodeInput.trim() === publicPasscode) {
+                setPasscode(passcodeInput.trim());
+                setPasscodeError('');
+              } else {
+                setPasscodeError('Incorrect passcode');
+              }
+            }}
+          >Access</button>
+          {passcodeError && <div className="text-red-500 text-xs mt-2">{passcodeError}</div>}
+          <div className="text-xs text-slate-400 mt-4 select-all">
+            {/* Debug info for troubleshooting, remove in production */}
+            <div>Env passcode: <span style={{fontFamily:'monospace'}}>{publicPasscode || '(empty)'}</span></div>
+            <div>Build time: {new Date().toISOString()}</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const handleAddPurchase = (e: React.FormEvent) => {
     e.preventDefault();
