@@ -124,26 +124,56 @@ const App: React.FC = () => {
     };
   }, [portfolio, isInitialLoad, passcode, publicPasscode]);
 
+
+  // Annual YoC progression for each stock
+  function getAnnualYoC(stock: Stock, dividends: Dividend[]) {
+    // Get all years from first purchase to current year
+    const years = Array.from(new Set([
+      ...stock.purchases.map(p => new Date(p.date).getFullYear()),
+      ...dividends.filter(d => d.stockId === stock.id).map(d => new Date(d.date).getFullYear())
+    ])).sort();
+    if (years.length === 0) return [];
+    const minYear = Math.min(...years);
+    const maxYear = new Date().getFullYear();
+    const result = [];
+    for (let year = minYear; year <= maxYear; year++) {
+      // Invested capital up to and including this year (cash only)
+      const invested = stock.purchases
+        .filter(p => (!p.type || p.type === 'buy') && new Date(p.date).getFullYear() <= year)
+        .reduce((sum, p) => sum + (p.shares * p.price), 0);
+      // Dividends received in this year
+      const divs = dividends
+        .filter(d => d.stockId === stock.id && new Date(d.date).getFullYear() === year)
+        .reduce((sum, d) => sum + d.amount, 0);
+      // Cumulative dividends up to this year
+      const cumDivs = dividends
+        .filter(d => d.stockId === stock.id && new Date(d.date).getFullYear() <= year)
+        .reduce((sum, d) => sum + d.amount, 0);
+      result.push({
+        year,
+        invested,
+        divs,
+        cumDivs,
+        yoc: invested > 0 ? (cumDivs / invested) * 100 : 0,
+        yocYear: invested > 0 ? (divs / invested) * 100 : 0
+      });
+    }
+    return result;
+  }
+
   const stockStats = useMemo(() => {
     return portfolio.stocks.map(stock => {
       const totalShares = stock.purchases.reduce((sum, p) => sum + p.shares, 0);
       const totalCost = stock.purchases.reduce((sum, p) => sum + (p.shares * p.price), 0);
-      
-      // Calculate purely invested capital (cash from pocket, excluding DRIP)
       const investedCapital = stock.purchases
         .filter(p => !p.type || p.type === 'buy')
         .reduce((sum, p) => sum + (p.shares * p.price), 0);
-
       const avgPrice = totalShares > 0 ? totalCost / totalShares : 0;
       const stockDividends = portfolio.dividends
         .filter(d => d.stockId === stock.id)
         .reduce((sum, d) => sum + d.amount, 0);
-      
-      // Standard Yield on Cost = (Total Divs / Invested Capital)
-      // Note: This is simplified. True forward YoC needs annual dividend rate.
-      // Here we show "Historical Yield on Invested Capital".
       const yieldOnCost = investedCapital > 0 ? (stockDividends / investedCapital) * 100 : 0;
-
+      const annualYoC = getAnnualYoC(stock, portfolio.dividends);
       return {
         ...stock,
         totalShares,
@@ -151,7 +181,8 @@ const App: React.FC = () => {
         investedCapital,
         avgPrice,
         stockDividends,
-        yieldOnCost
+        yieldOnCost,
+        annualYoC
       };
     });
   }, [portfolio.stocks, portfolio.dividends]);
@@ -543,6 +574,33 @@ const App: React.FC = () => {
                                         </button>
                                       </div>
                                     ))}
+                                  </div>
+                                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mt-8">Yield on Cost Progression</h4>
+                                  <div className="overflow-x-auto mt-2">
+                                    <table className="min-w-[400px] text-xs border border-slate-200 rounded-xl">
+                                      <thead className="bg-slate-100">
+                                        <tr>
+                                          <th className="px-2 py-1">Year</th>
+                                          <th className="px-2 py-1">Invested</th>
+                                          <th className="px-2 py-1">Divs (yr)</th>
+                                          <th className="px-2 py-1">Cum Divs</th>
+                                          <th className="px-2 py-1">YoC (yr)</th>
+                                          <th className="px-2 py-1">YoC (cum)</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {stock.annualYoC.map(row => (
+                                          <tr key={row.year}>
+                                            <td className="px-2 py-1 text-center font-bold">{row.year}</td>
+                                            <td className="px-2 py-1 text-right">${row.invested.toLocaleString(undefined, {maximumFractionDigits:0})}</td>
+                                            <td className="px-2 py-1 text-right">${row.divs.toLocaleString(undefined, {maximumFractionDigits:2})}</td>
+                                            <td className="px-2 py-1 text-right">${row.cumDivs.toLocaleString(undefined, {maximumFractionDigits:2})}</td>
+                                            <td className="px-2 py-1 text-right">{row.yocYear.toFixed(2)}%</td>
+                                            <td className="px-2 py-1 text-right">{row.yoc.toFixed(2)}%</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
                                   </div>
                                 </div>
                               </td>
