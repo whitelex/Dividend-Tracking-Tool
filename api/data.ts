@@ -38,7 +38,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const client = await connectToDatabase();
-    const collection = client.db('divitrack').collection('data');
+    // Using <any> here prevents TypeScript from enforcing ObjectId for the _id field,
+    // which allows us to use the string 'master' as a stable key.
+    const collection = client.db('divitrack').collection<any>('data');
 
     if (req.method === 'GET') {
       const data = await collection.findOne({ _id: 'master' });

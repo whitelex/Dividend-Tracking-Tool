@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   TrendingUp, 
@@ -63,7 +64,8 @@ const App: React.FC = () => {
   }, []);
 
   // Sync Data
-  const saveTimeout = useRef<number>();
+  // Fix line 66: useRef requires an initial value in certain TypeScript configurations.
+  const saveTimeout = useRef<number | undefined>(undefined);
   useEffect(() => {
     if (isLoading) return;
     
