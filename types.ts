@@ -1,4 +1,3 @@
-
 export interface Purchase {
   id: string;
   shares: number;
