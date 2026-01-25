@@ -44,7 +44,8 @@ const App: React.FC = () => {
   const [passcode, setPasscode] = useState(getStoredPasscode());
   const [passcodeInput, setPasscodeInput] = useState('');
   const [passcodeError, setPasscodeError] = useState('');
-  const publicPasscode = (window as any).__PUBLIC_PASSCODE__ || '';
+  // Ensure passcode is string and trim whitespace
+  const publicPasscode = ((window as any).__PUBLIC_PASSCODE__ || '').toString().trim();
 
   useEffect(() => {
     if (passcode && passcode === publicPasscode) {
@@ -52,7 +53,7 @@ const App: React.FC = () => {
     }
   }, [passcode, publicPasscode]);
 
-  if (!passcode || passcode !== publicPasscode) {
+  if (!passcode || passcode.trim() !== publicPasscode) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-100">
         <div className="bg-white p-8 rounded-3xl shadow-xl max-w-xs w-full flex flex-col items-center">
@@ -64,8 +65,8 @@ const App: React.FC = () => {
             value={passcodeInput}
             onChange={e => { setPasscodeInput(e.target.value); setPasscodeError(''); }}
             onKeyDown={e => { if (e.key === 'Enter') {
-              if (passcodeInput === publicPasscode) {
-                setPasscode(passcodeInput);
+              if (passcodeInput.trim() === publicPasscode) {
+                setPasscode(passcodeInput.trim());
                 setPasscodeError('');
               } else {
                 setPasscodeError('Incorrect passcode');
@@ -76,8 +77,8 @@ const App: React.FC = () => {
           <button
             className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold text-sm mt-2 hover:bg-indigo-700 transition-all"
             onClick={() => {
-              if (passcodeInput === publicPasscode) {
-                setPasscode(passcodeInput);
+              if (passcodeInput.trim() === publicPasscode) {
+                setPasscode(passcodeInput.trim());
                 setPasscodeError('');
               } else {
                 setPasscodeError('Incorrect passcode');
@@ -85,6 +86,10 @@ const App: React.FC = () => {
             }}
           >Access</button>
           {passcodeError && <div className="text-red-500 text-xs mt-2">{passcodeError}</div>}
+          <div className="text-xs text-slate-400 mt-4 select-all">
+            {/* Debug info for troubleshooting, remove in production */}
+            <div>Env passcode: <span style={{fontFamily:'monospace'}}>{publicPasscode || '(empty)'}</span></div>
+          </div>
         </div>
       </div>
     );
