@@ -1,17 +1,30 @@
-
-import { MongoClient } from 'mongodb';
+import { MongoClient, ServerApiVersion } from 'mongodb';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const uri = process.env.MONGODB_STRING;
 let cachedClient: MongoClient | null = null;
 
 async function getMongoClient() {
-  if (cachedClient) return cachedClient;
+  if (cachedClient) {
+    try {
+      // Basic check if connection is still alive
+      await cachedClient.db('admin').command({ ping: 1 });
+      return cachedClient;
+    } catch (e) {
+      cachedClient = null;
+    }
+  }
+  
   if (!uri) throw new Error('MONGODB_STRING environment variable is missing in Vercel');
   
   const client = new MongoClient(uri, {
+    serverApi: {
+      version: ServerApiVersion.v1,
+      strict: true,
+      deprecationErrors: true,
+    },
     connectTimeoutMS: 10000,
-    socketTimeoutMS: 10000,
+    socketTimeoutMS: 15000,
   });
   
   await client.connect();
@@ -20,7 +33,7 @@ async function getMongoClient() {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  res.setHeader('Content-Type', 'application/json');
+  // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -63,9 +76,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (error: any) {
     console.error('API Error:', error);
     return res.status(500).json({ 
-      error: 'Backend Error', 
-      message: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      error: 'Backend Database Error', 
+      message: error.message
     });
   }
 }
