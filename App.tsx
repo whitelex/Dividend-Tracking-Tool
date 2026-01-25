@@ -72,6 +72,9 @@ const App: React.FC = () => {
       try {
         const response = await fetch('/api/data', {
           method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
           body: JSON.stringify(portfolio)
         });
         if (!response.ok) throw new Error('Save failed');
@@ -80,7 +83,7 @@ const App: React.FC = () => {
         console.error('Save error:', err);
         setSyncStatus('error');
       }
-    }, 1000);
+    }, 1500);
 
     return () => {
       if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
@@ -150,7 +153,10 @@ const App: React.FC = () => {
 
     const newStocks = [...portfolio.stocks];
     if (existingStockIndex >= 0) {
-      newStocks[existingStockIndex].purchases.push(purchase);
+      newStocks[existingStockIndex] = {
+        ...newStocks[existingStockIndex],
+        purchases: [...newStocks[existingStockIndex].purchases, purchase]
+      };
     } else {
       newStocks.push({
         id: Math.random().toString(36).substr(2, 9),
@@ -210,7 +216,7 @@ const App: React.FC = () => {
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <div className="flex items-center space-x-2">
             <TrendingUp className="h-8 w-8 text-indigo-200" />
-            <h1 className="text-2xl font-bold tracking-tight">DiviTrack <span className="text-indigo-200">Pro</span></h1>
+            <h1 className="text-2xl font-bold tracking-tight text-white">DiviTrack <span className="text-indigo-200">Pro</span></h1>
             
             <div className={`ml-4 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center transition-colors ${
               syncStatus === 'saved' ? 'bg-indigo-600 text-indigo-100' : 
