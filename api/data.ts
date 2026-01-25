@@ -1,3 +1,4 @@
+
 import { MongoClient } from 'mongodb';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
@@ -6,12 +7,11 @@ let cachedClient: MongoClient | null = null;
 
 async function getMongoClient() {
   if (cachedClient) return cachedClient;
-  if (!uri) throw new Error('MONGODB_STRING environment variable is not set');
+  if (!uri) throw new Error('MONGODB_STRING environment variable is missing in Vercel');
   
   const client = new MongoClient(uri, {
-    connectTimeoutMS: 5000,
-    socketTimeoutMS: 5000,
-    serverSelectionTimeoutMS: 5000,
+    connectTimeoutMS: 10000,
+    socketTimeoutMS: 10000,
   });
   
   await client.connect();
@@ -20,7 +20,6 @@ async function getMongoClient() {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Set common headers for API responses
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
@@ -36,28 +35,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const collection = db.collection('portfolio');
 
     if (req.method === 'GET') {
-      try {
-        const data = await collection.findOne({ _id: 'master_portfolio' });
-        return res.status(200).json(data || { stocks: [], dividends: [] });
-      } catch (err) {
-        // Fallback for fresh databases
-        return res.status(200).json({ stocks: [], dividends: [] });
-      }
+      const data = await collection.findOne({ _id: 'master_portfolio' });
+      return res.status(200).json(data || { stocks: [], dividends: [] });
     } 
     
     if (req.method === 'POST') {
       let payload = req.body;
-      
-      // Vercel might pass body as string or object depending on deployment config
       if (typeof payload === 'string') {
-        try {
-          payload = JSON.parse(payload);
-        } catch (e) {
-          return res.status(400).json({ error: 'Invalid JSON body' });
-        }
+        payload = JSON.parse(payload);
       }
 
-      // Ensure consistent data structure
       const cleanedData = {
         stocks: Array.isArray(payload.stocks) ? payload.stocks : [],
         dividends: Array.isArray(payload.dividends) ? payload.dividends : []
@@ -75,10 +62,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (error: any) {
     console.error('API Error:', error);
-    // Send a structured error back so fetch doesn't hang indefinitely
     return res.status(500).json({ 
-      error: 'Database connection failed', 
-      message: error.message 
+      error: 'Backend Error', 
+      message: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 }
