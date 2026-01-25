@@ -4,6 +4,7 @@ export interface Purchase {
   shares: number;
   price: number;
   date: string;
+  type?: 'buy' | 'drip'; // 'buy' = cash purchase, 'drip' = dividend reinvestment
 }
 
 export interface Stock {
@@ -18,6 +19,8 @@ export interface Dividend {
   ticker: string;
   amount: number;
   date: string;
+  reinvested?: boolean;
+  linkedPurchaseId?: string; // ID of the Purchase created from this dividend
 }
 
 export interface PortfolioState {

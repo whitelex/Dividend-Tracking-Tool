@@ -63,7 +63,14 @@ const App: React.FC = () => {
   const [expandedStockId, setExpandedStockId] = useState<string | null>(null);
 
   const [newPurchase, setNewPurchase] = useState({ ticker: '', shares: 0, price: 0, date: new Date().toISOString().split('T')[0] });
-  const [newDiv, setNewDiv] = useState({ stockId: '', amount: 0, date: new Date().toISOString().split('T')[0] });
+  const [newDiv, setNewDiv] = useState({ 
+    stockId: '', 
+    amount: 0, 
+    date: new Date().toISOString().split('T')[0],
+    reinvested: false,
+    sharePrice: 0,
+    sharesBought: 0
+  });
 
   // Move hooks before any conditional return
   useEffect(() => {
@@ -121,16 +128,27 @@ const App: React.FC = () => {
     return portfolio.stocks.map(stock => {
       const totalShares = stock.purchases.reduce((sum, p) => sum + p.shares, 0);
       const totalCost = stock.purchases.reduce((sum, p) => sum + (p.shares * p.price), 0);
+      
+      // Calculate purely invested capital (cash from pocket, excluding DRIP)
+      const investedCapital = stock.purchases
+        .filter(p => !p.type || p.type === 'buy')
+        .reduce((sum, p) => sum + (p.shares * p.price), 0);
+
       const avgPrice = totalShares > 0 ? totalCost / totalShares : 0;
       const stockDividends = portfolio.dividends
         .filter(d => d.stockId === stock.id)
         .reduce((sum, d) => sum + d.amount, 0);
-      const yieldOnCost = totalCost > 0 ? (stockDividends / totalCost) * 100 : 0;
+      
+      // Standard Yield on Cost = (Total Divs / Invested Capital)
+      // Note: This is simplified. True forward YoC needs annual dividend rate.
+      // Here we show "Historical Yield on Invested Capital".
+      const yieldOnCost = investedCapital > 0 ? (stockDividends / investedCapital) * 100 : 0;
 
       return {
         ...stock,
         totalShares,
         totalCost,
+        investedCapital,
         avgPrice,
         stockDividends,
         yieldOnCost
@@ -139,7 +157,12 @@ const App: React.FC = () => {
   }, [portfolio.stocks, portfolio.dividends]);
 
   const totalPortfolioValue = useMemo(() => {
+    // Current value based on cost (since we don't have live price)
     return stockStats.reduce((sum, s) => sum + s.totalCost, 0);
+  }, [stockStats]);
+
+  const totalInvestedCapital = useMemo(() => {
+    return stockStats.reduce((sum, s) => sum + s.investedCapital, 0);
   }, [stockStats]);
 
   const totalDividends = useMemo(() => {
@@ -215,7 +238,8 @@ const App: React.FC = () => {
       id: Math.random().toString(36).substr(2, 9),
       shares: Number(newPurchase.shares),
       price: Number(newPurchase.price),
-      date: newPurchase.date
+      date: newPurchase.date,
+      type: 'buy'
     };
 
     const newStocks = [...portfolio.stocks];
@@ -244,17 +268,51 @@ const App: React.FC = () => {
     const selectedStock = portfolio.stocks.find(s => s.id === newDiv.stockId);
     if (!selectedStock) return;
 
+    let linkedPurchaseId = undefined;
+    let newStocks = [...portfolio.stocks];
+
+    if (newDiv.reinvested && newDiv.sharesBought > 0 && newDiv.sharePrice > 0) {
+      linkedPurchaseId = Math.random().toString(36).substr(2, 9);
+      const purchase: Purchase = {
+        id: linkedPurchaseId,
+        shares: Number(newDiv.sharesBought),
+        price: Number(newDiv.sharePrice),
+        date: newDiv.date,
+        type: 'drip'
+      };
+
+      const stockIndex = newStocks.findIndex(s => s.id === newDiv.stockId);
+      if (stockIndex >= 0) {
+        newStocks[stockIndex] = {
+          ...newStocks[stockIndex],
+          purchases: [...newStocks[stockIndex].purchases, purchase]
+        };
+      }
+    }
+
     const div: Dividend = {
       id: Math.random().toString(36).substr(2, 9),
       stockId: newDiv.stockId,
       ticker: selectedStock.ticker,
       amount: Number(newDiv.amount),
-      date: newDiv.date
+      date: newDiv.date,
+      reinvested: newDiv.reinvested,
+      linkedPurchaseId
     };
 
-    setPortfolio(prev => ({ ...prev, dividends: [...prev.dividends, div] }));
+    setPortfolio(prev => ({ 
+      stocks: newStocks,
+      dividends: [...prev.dividends, div] 
+    }));
     setIsDivModalOpen(false);
-    setNewDiv({ stockId: '', amount: 0, date: new Date().toISOString().split('T')[0] });
+    setNewDiv({ 
+      stockId: '', 
+      amount: 0, 
+      date: new Date().toISOString().split('T')[0],
+      reinvested: false,
+      sharePrice: 0,
+      sharesBought: 0
+    });
   };
 
   const deleteStock = (id: string) => {
@@ -333,10 +391,11 @@ const App: React.FC = () => {
               <p className="text-2xl font-black text-emerald-600">${totalDividends.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
             </div>
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Global Yield on Cost</p>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Yield on Invested</p>
               <p className="text-2xl font-black text-indigo-600">
-                {totalPortfolioValue > 0 ? ((totalDividends / totalPortfolioValue) * 100).toFixed(2) : '0.00'}%
+                {totalInvestedCapital > 0 ? ((totalDividends / totalInvestedCapital) * 100).toFixed(2) : '0.00'}%
               </p>
+              <p className="text-[10px] text-slate-400 font-bold mt-1">on ${totalInvestedCapital.toLocaleString(undefined, { maximumFractionDigits: 0 })} cash invested</p>
             </div>
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Positions</p>
@@ -419,7 +478,7 @@ const App: React.FC = () => {
                         <th className="px-6 py-4 text-right">Shares</th>
                         <th className="px-6 py-4 text-right">Avg Cost</th>
                         <th className="px-6 py-4 text-right">Total Invested</th>
-                        <th className="px-6 py-4 text-right">Yield on Cost</th>
+                        <th className="px-6 py-4 text-right">Return from Divs</th>
                         <th className="px-6 py-4 text-center">Actions</th>
                       </tr>
                     </thead>
@@ -439,9 +498,14 @@ const App: React.FC = () => {
                                 <span className="text-[10px] text-indigo-500 font-bold uppercase">{stock.purchases.length} buys</span>
                               </div>
                             </td>
-                            <td className="px-6 py-4 text-right font-medium text-slate-600">{stock.totalShares.toFixed(2)}</td>
+                            <td className="px-6 py-4 text-right font-medium text-slate-600">{stock.totalShares.toFixed(4)}</td>
                             <td className="px-6 py-4 text-right text-slate-600">${stock.avgPrice.toFixed(2)}</td>
-                            <td className="px-6 py-4 text-right font-bold text-slate-900">${stock.totalCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                            <td className="px-6 py-4 text-right font-bold text-slate-900">
+                              <div className="flex flex-col items-end">
+                                <span>${stock.investedCapital.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                <span className="text-[10px] text-slate-400 font-normal">Total Value: ${stock.totalCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                              </div>
+                            </td>
                             <td className="px-6 py-4 text-right">
                               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${stock.yieldOnCost > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
                                 {stock.yieldOnCost.toFixed(2)}%
@@ -463,10 +527,13 @@ const App: React.FC = () => {
                                   <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Purchase History</h4>
                                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                                     {stock.purchases.sort((a,b) => b.date.localeCompare(a.date)).map(p => (
-                                      <div key={p.id} className="group flex justify-between items-center p-3 border border-slate-100 rounded-xl hover:border-indigo-200 hover:bg-indigo-50/20 transition-all">
+                                      <div key={p.id} className={`group flex justify-between items-center p-3 border rounded-xl hover:border-indigo-200 hover:bg-indigo-50/20 transition-all ${p.type === 'drip' ? 'border-emerald-100 bg-emerald-50/30' : 'border-slate-100'}`}>
                                         <div className="flex flex-col">
-                                          <span className="text-[10px] font-bold text-slate-400">{p.date}</span>
-                                          <span className="text-sm font-bold text-slate-800">{p.shares} sh @ ${p.price.toFixed(2)}</span>
+                                          <div className="flex items-center space-x-2">
+                                            <span className="text-[10px] font-bold text-slate-400">{p.date}</span>
+                                            {p.type === 'drip' && <span className="text-[8px] font-black uppercase bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded-full">DRIP</span>}
+                                          </div>
+                                          <span className="text-sm font-bold text-slate-800">{p.shares.toFixed(4)} sh @ ${p.price.toFixed(2)}</span>
                                         </div>
                                         <button 
                                           onClick={() => deletePurchase(stock.id, p.id)}
@@ -639,6 +706,56 @@ const App: React.FC = () => {
                   className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900"
                 />
               </div>
+
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                <div className="flex items-center mb-4">
+                  <input
+                    type="checkbox"
+                    id="reinvested"
+                    checked={newDiv.reinvested}
+                    onChange={e => setNewDiv({...newDiv, reinvested: e.target.checked})}
+                    className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <label htmlFor="reinvested" className="ml-2 text-sm font-bold text-slate-700">Reinvested (DRIP)</label>
+                </div>
+                
+                {newDiv.reinvested && (
+                  <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div>
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Share Price</label>
+                      <input 
+                        type="number" 
+                        step="0.01"
+                        placeholder="0.00"
+                        required={newDiv.reinvested}
+                        value={newDiv.sharePrice || ''}
+                        onChange={e => {
+                          const price = Number(e.target.value);
+                          setNewDiv(prev => ({
+                            ...prev, 
+                            sharePrice: price,
+                            sharesBought: price > 0 ? Number((prev.amount / price).toFixed(6)) : 0
+                          }));
+                        }}
+                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Shares Bought</label>
+                      <input 
+                        type="number" 
+                        step="0.0001"
+                        placeholder="0.0000"
+                        required={newDiv.reinvested}
+                        value={newDiv.sharesBought || ''}
+                        onChange={e => setNewDiv({...newDiv, sharesBought: Number(e.target.value)})}
+                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900 text-sm"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <button type="submit" className="w-full bg-emerald-600 text-white py-5 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-xl active:scale-95 mt-4">
                 Record Payment
               </button>
