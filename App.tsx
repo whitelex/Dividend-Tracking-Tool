@@ -198,9 +198,6 @@ const App: React.FC = () => {
           >Access</button>
           {passcodeError && <div className="text-red-500 text-xs mt-2">{passcodeError}</div>}
           <div className="text-xs text-slate-400 mt-4 select-all">
-            {/* Debug info for troubleshooting, remove in production */}
-            <div>Env passcode: <span style={{fontFamily:'monospace'}}>{publicPasscode || '(empty)'}</span></div>
-            <div>Build time: {new Date().toISOString()}</div>
           </div>
         </div>
       </div>
