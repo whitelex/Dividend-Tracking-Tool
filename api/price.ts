@@ -1,6 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import yahooFinance from 'yahoo-finance2';
-import type { QuoteType } from 'yahoo-finance2/dist/types';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
@@ -17,12 +16,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const results: Record<string, number> = {};
     
     // Yahoo Finance can fetch multiple quotes at once
-    const quotes = await yahooFinance.quote(tickerList) as QuoteType | QuoteType[];
+    const quotes = await yahooFinance.quote(tickerList) as any;
 
     // Check if quotes is array (multiple results) or single object
-    const quotesArray: QuoteType[] = Array.isArray(quotes) ? quotes : [quotes];
+    const quotesArray = Array.isArray(quotes) ? quotes : [quotes];
 
-    quotesArray.forEach(q => {
+    quotesArray.forEach((q: any) => {
       if (q && typeof q.symbol === 'string' && typeof q.regularMarketPrice === 'number') {
         results[q.symbol] = q.regularMarketPrice;
       }
