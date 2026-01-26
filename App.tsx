@@ -532,172 +532,167 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-            <div className="xl:col-span-2">
-              <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-                <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-                  <h2 className="text-lg font-bold text-slate-800">Your Portfolio</h2>
-                  <div className="flex items-center text-slate-400 text-xs">
-                    <Calendar className="h-3 w-3 mr-1" /> Last updated: {new Date().toLocaleDateString()}
-                  </div>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left">
-                    <thead className="bg-slate-50 text-slate-500 text-xs font-bold uppercase tracking-wider">
-                      <tr>
-                        <th className="px-6 py-4 w-10"></th>
-                        <th className="px-6 py-4">Asset</th>
-                        <th className="px-6 py-4 text-right">Shares</th>
-                        <th className="px-6 py-4 text-right">Avg Cost</th>
-                        <th className="px-6 py-4 text-right">Price</th>
-                        <th className="px-6 py-4 text-right">Total Invested</th>
-                        <th className="px-6 py-4 text-right">Performance</th>
-                        <th className="px-6 py-4 text-right">Return from Divs</th>
-                        <th className="px-6 py-4 text-center">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {stockStats.length > 0 ? stockStats.map(stock => (
-                        <React.Fragment key={stock.id}>
-                          <tr 
-                            className={`hover:bg-slate-50 transition-colors cursor-pointer ${expandedStockId === stock.id ? 'bg-indigo-50/30' : ''}`}
-                            onClick={() => setExpandedStockId(expandedStockId === stock.id ? null : stock.id)}
-                          >
-                            <td className="px-6 py-4">
-                              {expandedStockId === stock.id ? <ChevronDown className="h-4 w-4 text-indigo-500" /> : <ChevronRight className="h-4 w-4 text-slate-300" />}
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="flex flex-col">
-                                <span className="font-black text-slate-900">{stock.ticker}</span>
-                                <span className="text-[10px] text-indigo-500 font-bold uppercase">{stock.purchases.length} buys</span>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 text-right font-medium text-slate-600">{stock.totalShares.toFixed(4)}</td>
-                            <td className="px-6 py-4 text-right text-slate-600">${stock.avgPrice.toFixed(2)}</td>
-                            <td className="px-6 py-4 text-right text-slate-900 font-bold">
-                              {stock.currentPrice ? `$${stock.currentPrice.toFixed(2)}` : '-'}
-                            </td>
-                            <td className="px-6 py-4 text-right font-bold text-slate-900">
-                              <div className="flex flex-col items-end">
-                                <span>${stock.investedCapital.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                                <span className="text-[10px] text-slate-400 font-normal">Mkt Value: ${stock.marketValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 text-right">
-                              <div className={`flex flex-col items-end font-bold ${stock.gainLoss >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                                <span>{stock.gainLossPercent > 0 ? '+' : ''}{stock.gainLossPercent.toFixed(2)}%</span>
-                                <span className="text-[10px] opacity-75">${stock.gainLoss.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 text-right">
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${stock.yieldOnCost > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                                {stock.yieldOnCost.toFixed(2)}%
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 text-center">
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); deleteStock(stock.id); }}
-                                className="p-2 text-slate-300 hover:text-red-500 transition-colors rounded-lg hover:bg-red-50"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </td>
-                          </tr>
-                          {expandedStockId === stock.id && (
-                            <tr>
-                              <td colSpan={9} className="px-6 py-4 bg-slate-50/50">
-                                <div className="pl-10 space-y-3">
-                                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Purchase History</h4>
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                                    {stock.purchases.sort((a,b) => b.date.localeCompare(a.date)).map(p => (
-                                      <div key={p.id} className={`group flex justify-between items-center p-3 border rounded-xl hover:border-indigo-200 hover:bg-indigo-50/20 transition-all ${p.type === 'drip' ? 'border-emerald-100 bg-emerald-50/30' : 'border-slate-100'}`}>
-                                        <div className="flex flex-col">
-                                          <div className="flex items-center space-x-2">
-                                            <span className="text-[10px] font-bold text-slate-400">{p.date}</span>
-                                            {p.type === 'drip' && <span className="text-[8px] font-black uppercase bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded-full">DRIP</span>}
-                                          </div>
-                                          <span className="text-sm font-bold text-slate-800">{p.shares.toFixed(4)} sh @ ${p.price.toFixed(2)}</span>
-                                        </div>
-                                        <button 
-                                          onClick={() => deletePurchase(stock.id, p.id)}
-                                          className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-300 hover:text-red-500 transition-all"
-                                        >
-                                          <Trash2 className="h-3 w-3" />
-                                        </button>
-                                      </div>
-                                    ))}
-                                  </div>
-                                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mt-8">Yield on Cost Progression</h4>
-                                  <div className="overflow-x-auto mt-2">
-                                    <table className="min-w-[400px] text-xs border border-slate-200 rounded-xl">
-                                      <thead className="bg-slate-100">
-                                        <tr>
-                                          <th className="px-2 py-1">Year</th>
-                                          <th className="px-2 py-1">Invested</th>
-                                          <th className="px-2 py-1">Divs (yr)</th>
-                                          <th className="px-2 py-1">Cum Divs</th>
-                                          <th className="px-2 py-1">YoC (yr)</th>
-                                          <th className="px-2 py-1">YoC (cum)</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {stock.annualYoC.map(row => (
-                                          <tr key={row.year}>
-                                            <td className="px-2 py-1 text-center font-bold">{row.year}</td>
-                                            <td className="px-2 py-1 text-right">${row.invested.toLocaleString(undefined, {maximumFractionDigits:0})}</td>
-                                            <td className="px-2 py-1 text-right">${row.divs.toLocaleString(undefined, {maximumFractionDigits:2})}</td>
-                                            <td className="px-2 py-1 text-right">${row.cumDivs.toLocaleString(undefined, {maximumFractionDigits:2})}</td>
-                                            <td className="px-2 py-1 text-right">{row.yocYear.toFixed(2)}%</td>
-                                            <td className="px-2 py-1 text-right">{row.yoc.toFixed(2)}%</td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </React.Fragment>
-                      )) : (
-                        <tr>
-                          <td colSpan={9} className="px-6 py-20 text-center text-slate-300 italic">
-                            <Wallet className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                            <p className="text-lg">Your portfolio is currently empty.</p>
-                            <p className="text-sm">Click "Add Purchase" to track your first asset.</p>
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+          <div className="space-y-8">
+            <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+                <h2 className="text-lg font-bold text-slate-800">Your Portfolio</h2>
+                <div className="flex items-center text-slate-400 text-xs">
+                  <Calendar className="h-3 w-3 mr-1" /> Last updated: {new Date().toLocaleDateString()}
                 </div>
               </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead className="bg-slate-50 text-slate-500 text-xs font-bold uppercase tracking-wider">
+                    <tr>
+                      <th className="px-6 py-4 w-10"></th>
+                      <th className="px-6 py-4">Asset</th>
+                      <th className="px-6 py-4 text-right">Shares</th>
+                      <th className="px-6 py-4 text-right">Avg Cost</th>
+                      <th className="px-6 py-4 text-right">Price</th>
+                      <th className="px-6 py-4 text-right">Total Invested</th>
+                      <th className="px-6 py-4 text-right">Performance</th>
+                      <th className="px-6 py-4 text-right">Return from Divs</th>
+                      <th className="px-6 py-4 text-center">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {stockStats.length > 0 ? stockStats.map(stock => (
+                      <React.Fragment key={stock.id}>
+                        <tr 
+                          className={`hover:bg-slate-50 transition-colors cursor-pointer ${expandedStockId === stock.id ? 'bg-indigo-50/30' : ''}`}
+                          onClick={() => setExpandedStockId(expandedStockId === stock.id ? null : stock.id)}
+                        >
+                          <td className="px-6 py-4">
+                            {expandedStockId === stock.id ? <ChevronDown className="h-4 w-4 text-indigo-500" /> : <ChevronRight className="h-4 w-4 text-slate-300" />}
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex flex-col">
+                              <span className="font-black text-slate-900">{stock.ticker}</span>
+                              <span className="text-[10px] text-indigo-500 font-bold uppercase">{stock.purchases.length} buys</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-right font-medium text-slate-600">{stock.totalShares.toFixed(4)}</td>
+                          <td className="px-6 py-4 text-right text-slate-600">${stock.avgPrice.toFixed(2)}</td>
+                          <td className="px-6 py-4 text-right text-slate-900 font-bold">
+                            {stock.currentPrice ? `$${stock.currentPrice.toFixed(2)}` : '-'}
+                          </td>
+                          <td className="px-6 py-4 text-right font-bold text-slate-900">
+                            <div className="flex flex-col items-end">
+                              <span>${stock.investedCapital.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                              <span className="text-[10px] text-slate-400 font-normal">Mkt Value: ${stock.marketValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className={`flex flex-col items-end font-bold ${stock.gainLoss >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                              <span>{stock.gainLossPercent > 0 ? '+' : ''}{stock.gainLossPercent.toFixed(2)}%</span>
+                              <span className="text-[10px] opacity-75">${stock.gainLoss.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${stock.yieldOnCost > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                              {stock.yieldOnCost.toFixed(2)}%
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); deleteStock(stock.id); }}
+                              className="p-2 text-slate-300 hover:text-red-500 transition-colors rounded-lg hover:bg-red-50"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </td>
+                        </tr>
+                        {expandedStockId === stock.id && (
+                          <tr>
+                            <td colSpan={9} className="px-6 py-4 bg-slate-50/50">
+                              <div className="pl-10 space-y-3">
+                                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Purchase History</h4>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                                  {stock.purchases.sort((a,b) => b.date.localeCompare(a.date)).map(p => (
+                                    <div key={p.id} className={`group flex justify-between items-center p-3 border rounded-xl hover:border-indigo-200 hover:bg-indigo-50/20 transition-all ${p.type === 'drip' ? 'border-emerald-100 bg-emerald-50/30' : 'border-slate-100'}`}>
+                                      <div className="flex flex-col">
+                                        <div className="flex items-center space-x-2">
+                                          <span className="text-[10px] font-bold text-slate-400">{p.date}</span>
+                                          {p.type === 'drip' && <span className="text-[8px] font-black uppercase bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded-full">DRIP</span>}
+                                        </div>
+                                        <span className="text-sm font-bold text-slate-800">{p.shares.toFixed(4)} sh @ ${p.price.toFixed(2)}</span>
+                                      </div>
+                                      <button 
+                                        onClick={() => deletePurchase(stock.id, p.id)}
+                                        className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-300 hover:text-red-500 transition-all"
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mt-8">Yield on Cost Progression</h4>
+                                <div className="overflow-x-auto mt-2">
+                                  <table className="min-w-[400px] text-xs border border-slate-200 rounded-xl">
+                                    <thead className="bg-slate-100">
+                                      <tr>
+                                        <th className="px-2 py-1">Year</th>
+                                        <th className="px-2 py-1">Invested</th>
+                                        <th className="px-2 py-1">Divs (yr)</th>
+                                        <th className="px-2 py-1">Cum Divs</th>
+                                        <th className="px-2 py-1">YoC (yr)</th>
+                                        <th className="px-2 py-1">YoC (cum)</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {stock.annualYoC.map(row => (
+                                        <tr key={row.year}>
+                                          <td className="px-2 py-1 text-center font-bold">{row.year}</td>
+                                          <td className="px-2 py-1 text-right">${row.invested.toLocaleString(undefined, {maximumFractionDigits:0})}</td>
+                                          <td className="px-2 py-1 text-right">${row.divs.toLocaleString(undefined, {maximumFractionDigits:2})}</td>
+                                          <td className="px-2 py-1 text-right">${row.cumDivs.toLocaleString(undefined, {maximumFractionDigits:2})}</td>
+                                          <td className="px-2 py-1 text-right">{row.yocYear.toFixed(2)}%</td>
+                                          <td className="px-2 py-1 text-right">{row.yoc.toFixed(2)}%</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    )) : (
+                      <tr>
+                        <td colSpan={9} className="px-6 py-20 text-center text-slate-300 italic">
+                          <Wallet className="h-12 w-12 mx-auto mb-4 opacity-20" />
+                          <p className="text-lg">Your portfolio is currently empty.</p>
+                          <p className="text-sm">Click \"Add Purchase\" to track your first asset.</p>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-
-            <div className="space-y-6">
-              <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6">
-                <h2 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
-                  <History className="h-5 w-5 mr-2 text-indigo-500" /> Recent Income
-                </h2>
-                <div className="space-y-3">
-                  {portfolio.dividends.slice(-8).reverse().map(div => (
-                    <div key={div.id} className="flex justify-between items-center p-4 rounded-2xl border border-slate-50 bg-slate-50/50 hover:bg-slate-50 transition-colors">
-                      <div className="flex items-center">
-                        <div className="h-10 w-10 rounded-full bg-emerald-100 flex items-center justify-center mr-4 text-emerald-600">
-                          <DollarSign className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <p className="font-black text-slate-900">{div.ticker}</p>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase">{div.date}</p>
-                        </div>
+            <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6">
+              <h2 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
+                <History className="h-5 w-5 mr-2 text-indigo-500" /> Recent Income
+              </h2>
+              <div className="space-y-3">
+                {portfolio.dividends.slice(-8).reverse().map(div => (
+                  <div key={div.id} className="flex justify-between items-center p-4 rounded-2xl border border-slate-50 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                    <div className="flex items-center">
+                      <div className="h-10 w-10 rounded-full bg-emerald-100 flex items-center justify-center mr-4 text-emerald-600">
+                        <DollarSign className="h-5 w-5" />
                       </div>
-                      <p className="font-black text-emerald-600 text-lg">+${div.amount.toFixed(2)}</p>
+                      <div>
+                        <p className="font-black text-slate-900">{div.ticker}</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase">{div.date}</p>
+                      </div>
                     </div>
-                  ))}
-                  {portfolio.dividends.length === 0 && (
-                    <p className="text-sm text-slate-300 italic text-center py-6">No income recorded</p>
-                  )}
-                </div>
+                    <p className="font-black text-emerald-600 text-lg">+${div.amount.toFixed(2)}</p>
+                  </div>
+                ))}
+                {portfolio.dividends.length === 0 && (
+                  <p className="text-sm text-slate-300 italic text-center py-6">No income recorded</p>
+                )}
               </div>
             </div>
           </div>
