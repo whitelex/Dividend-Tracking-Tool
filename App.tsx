@@ -1,3 +1,20 @@
+// Fetch current price for a ticker using the backend API
+function useStockPrice(ticker: string | undefined) {
+  const [price, setPrice] = React.useState<number | null>(null);
+  React.useEffect(() => {
+    if (!ticker) return;
+    let cancelled = false;
+    setPrice(null);
+    fetch(`/api/price?ticker=${encodeURIComponent(ticker)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (!cancelled && typeof data.price === 'number') setPrice(data.price);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [ticker]);
+  return price;
+}
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 // Passcode gate helpers
@@ -552,6 +569,15 @@ const App: React.FC = () => {
                             </td>
                           </tr>
                           {expandedStockId === stock.id && (
+                            <StockExpandedDetails stock={stock} deletePurchase={deletePurchase} />
+                          )}
+                        // Expanded stock details with price and performance
+                        const StockExpandedDetails: React.FC<{ stock: any, deletePurchase: (stockId: string, purchaseId: string) => void }> = ({ stock, deletePurchase }) => {
+                          const price = useStockPrice(stock.ticker);
+                          const marketValue = price !== null ? price * stock.totalShares : null;
+                          const unrealized = marketValue !== null ? marketValue - stock.totalCost : null;
+                          const totalReturn = marketValue !== null ? (marketValue + stock.stockDividends - stock.investedCapital) : null;
+                          return (
                             <tr>
                               <td colSpan={7} className="px-6 py-4 bg-slate-50/50">
                                 <div className="pl-10 space-y-3">
@@ -574,6 +600,29 @@ const App: React.FC = () => {
                                         </button>
                                       </div>
                                     ))}
+                                  </div>
+                                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mt-8">Performance</h4>
+                                  <div className="overflow-x-auto mt-2">
+                                    <table className="min-w-[400px] text-xs border border-slate-200 rounded-xl">
+                                      <tbody>
+                                        <tr>
+                                          <td className="px-2 py-1 font-bold">Current Price</td>
+                                          <td className="px-2 py-1 text-right">{price !== null ? `$${price.toFixed(2)}` : <span className="text-slate-400">Loading...</span>}</td>
+                                        </tr>
+                                        <tr>
+                                          <td className="px-2 py-1 font-bold">Market Value</td>
+                                          <td className="px-2 py-1 text-right">{marketValue !== null ? `$${marketValue.toLocaleString(undefined, {maximumFractionDigits:2})}` : '-'}</td>
+                                        </tr>
+                                        <tr>
+                                          <td className="px-2 py-1 font-bold">Unrealized Gain/Loss</td>
+                                          <td className="px-2 py-1 text-right">{unrealized !== null ? `${unrealized >= 0 ? '+' : ''}$${unrealized.toLocaleString(undefined, {maximumFractionDigits:2})}` : '-'}</td>
+                                        </tr>
+                                        <tr>
+                                          <td className="px-2 py-1 font-bold">Total Return (Divs + Price)</td>
+                                          <td className="px-2 py-1 text-right">{totalReturn !== null ? `${totalReturn >= 0 ? '+' : ''}$${totalReturn.toLocaleString(undefined, {maximumFractionDigits:2})}` : '-'}</td>
+                                        </tr>
+                                      </tbody>
+                                    </table>
                                   </div>
                                   <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mt-8">Yield on Cost Progression</h4>
                                   <div className="overflow-x-auto mt-2">
@@ -605,7 +654,8 @@ const App: React.FC = () => {
                                 </div>
                               </td>
                             </tr>
-                          )}
+                          );
+                        };
                         </React.Fragment>
                       )) : (
                         <tr>
