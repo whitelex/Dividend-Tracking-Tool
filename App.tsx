@@ -57,6 +57,92 @@ import { Stock, Dividend, PortfolioState, ChartData, DividendMonthData, Purchase
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
+// Expanded stock details with price and performance
+const StockExpandedDetails: React.FC<{ stock: any, deletePurchase: (stockId: string, purchaseId: string) => void }> = ({ stock, deletePurchase }) => {
+  const price = useStockPrice(stock.ticker);
+  const marketValue = price !== null ? price * stock.totalShares : null;
+  const unrealized = marketValue !== null ? marketValue - stock.totalCost : null;
+  const totalReturn = marketValue !== null ? (marketValue + stock.stockDividends - stock.investedCapital) : null;
+  return (
+    <tr>
+      <td colSpan={7} className="px-6 py-4 bg-slate-50/50">
+        <div className="pl-10 space-y-3">
+          <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Purchase History</h4>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+            {stock.purchases.sort((a,b) => b.date.localeCompare(a.date)).map(p => (
+              <div key={p.id} className={`group flex justify-between items-center p-3 border rounded-xl hover:border-indigo-200 hover:bg-indigo-50/20 transition-all ${p.type === 'drip' ? 'border-emerald-100 bg-emerald-50/30' : 'border-slate-100'}`}>
+                <div className="flex flex-col">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[10px] font-bold text-slate-400">{p.date}</span>
+                    {p.type === 'drip' && <span className="text-[8px] font-black uppercase bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded-full">DRIP</span>}
+                  </div>
+                  <span className="text-sm font-bold text-slate-800">{p.shares.toFixed(4)} sh @ ${p.price.toFixed(2)}</span>
+                </div>
+                <button 
+                  onClick={() => deletePurchase(stock.id, p.id)}
+                  className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-300 hover:text-red-500 transition-all"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+          <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mt-8">Performance</h4>
+          <div className="overflow-x-auto mt-2">
+            <table className="min-w-[400px] text-xs border border-slate-200 rounded-xl">
+              <tbody>
+                <tr>
+                  <td className="px-2 py-1 font-bold">Current Price</td>
+                  <td className="px-2 py-1 text-right">{price !== null ? `$${price.toFixed(2)}` : <span className="text-slate-400">Loading...</span>}</td>
+                </tr>
+                <tr>
+                  <td className="px-2 py-1 font-bold">Market Value</td>
+                  <td className="px-2 py-1 text-right">{marketValue !== null ? `$${marketValue.toLocaleString(undefined, {maximumFractionDigits:2})}` : '-'}</td>
+                </tr>
+                <tr>
+                  <td className="px-2 py-1 font-bold">Unrealized Gain/Loss</td>
+                  <td className="px-2 py-1 text-right">{unrealized !== null ? `${unrealized >= 0 ? '+' : ''}$${unrealized.toLocaleString(undefined, {maximumFractionDigits:2})}` : '-'}</td>
+                </tr>
+                <tr>
+                  <td className="px-2 py-1 font-bold">Total Return (Divs + Price)</td>
+                  <td className="px-2 py-1 text-right">{totalReturn !== null ? `${totalReturn >= 0 ? '+' : ''}$${totalReturn.toLocaleString(undefined, {maximumFractionDigits:2})}` : '-'}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mt-8">Yield on Cost Progression</h4>
+          <div className="overflow-x-auto mt-2">
+            <table className="min-w-[400px] text-xs border border-slate-200 rounded-xl">
+              <thead className="bg-slate-100">
+                <tr>
+                  <th className="px-2 py-1">Year</th>
+                  <th className="px-2 py-1">Invested</th>
+                  <th className="px-2 py-1">Divs (yr)</th>
+                  <th className="px-2 py-1">Cum Divs</th>
+                  <th className="px-2 py-1">YoC (yr)</th>
+                  <th className="px-2 py-1">YoC (cum)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stock.annualYoC.map(row => (
+                  <tr key={row.year}>
+                    <td className="px-2 py-1 text-center font-bold">{row.year}</td>
+                    <td className="px-2 py-1 text-right">${row.invested.toLocaleString(undefined, {maximumFractionDigits:0})}</td>
+                    <td className="px-2 py-1 text-right">${row.divs.toLocaleString(undefined, {maximumFractionDigits:2})}</td>
+                    <td className="px-2 py-1 text-right">${row.cumDivs.toLocaleString(undefined, {maximumFractionDigits:2})}</td>
+                    <td className="px-2 py-1 text-right">{row.yocYear.toFixed(2)}%</td>
+                    <td className="px-2 py-1 text-right">{row.yoc.toFixed(2)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
+};
+
 const App: React.FC = () => {
   const [passcode, setPasscode] = useState(getStoredPasscode());
   const [passcodeInput, setPasscodeInput] = useState('');
@@ -571,91 +657,7 @@ const App: React.FC = () => {
                           {expandedStockId === stock.id && (
                             <StockExpandedDetails stock={stock} deletePurchase={deletePurchase} />
                           )}
-                        // Expanded stock details with price and performance
-                        const StockExpandedDetails: React.FC<{ stock: any, deletePurchase: (stockId: string, purchaseId: string) => void }> = ({ stock, deletePurchase }) => {
-                          const price = useStockPrice(stock.ticker);
-                          const marketValue = price !== null ? price * stock.totalShares : null;
-                          const unrealized = marketValue !== null ? marketValue - stock.totalCost : null;
-                          const totalReturn = marketValue !== null ? (marketValue + stock.stockDividends - stock.investedCapital) : null;
-                          return (
-                            <tr>
-                              <td colSpan={7} className="px-6 py-4 bg-slate-50/50">
-                                <div className="pl-10 space-y-3">
-                                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Purchase History</h4>
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                                    {stock.purchases.sort((a,b) => b.date.localeCompare(a.date)).map(p => (
-                                      <div key={p.id} className={`group flex justify-between items-center p-3 border rounded-xl hover:border-indigo-200 hover:bg-indigo-50/20 transition-all ${p.type === 'drip' ? 'border-emerald-100 bg-emerald-50/30' : 'border-slate-100'}`}>
-                                        <div className="flex flex-col">
-                                          <div className="flex items-center space-x-2">
-                                            <span className="text-[10px] font-bold text-slate-400">{p.date}</span>
-                                            {p.type === 'drip' && <span className="text-[8px] font-black uppercase bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded-full">DRIP</span>}
-                                          </div>
-                                          <span className="text-sm font-bold text-slate-800">{p.shares.toFixed(4)} sh @ ${p.price.toFixed(2)}</span>
-                                        </div>
-                                        <button 
-                                          onClick={() => deletePurchase(stock.id, p.id)}
-                                          className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-300 hover:text-red-500 transition-all"
-                                        >
-                                          <Trash2 className="h-3 w-3" />
-                                        </button>
-                                      </div>
-                                    ))}
-                                  </div>
-                                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mt-8">Performance</h4>
-                                  <div className="overflow-x-auto mt-2">
-                                    <table className="min-w-[400px] text-xs border border-slate-200 rounded-xl">
-                                      <tbody>
-                                        <tr>
-                                          <td className="px-2 py-1 font-bold">Current Price</td>
-                                          <td className="px-2 py-1 text-right">{price !== null ? `$${price.toFixed(2)}` : <span className="text-slate-400">Loading...</span>}</td>
-                                        </tr>
-                                        <tr>
-                                          <td className="px-2 py-1 font-bold">Market Value</td>
-                                          <td className="px-2 py-1 text-right">{marketValue !== null ? `$${marketValue.toLocaleString(undefined, {maximumFractionDigits:2})}` : '-'}</td>
-                                        </tr>
-                                        <tr>
-                                          <td className="px-2 py-1 font-bold">Unrealized Gain/Loss</td>
-                                          <td className="px-2 py-1 text-right">{unrealized !== null ? `${unrealized >= 0 ? '+' : ''}$${unrealized.toLocaleString(undefined, {maximumFractionDigits:2})}` : '-'}</td>
-                                        </tr>
-                                        <tr>
-                                          <td className="px-2 py-1 font-bold">Total Return (Divs + Price)</td>
-                                          <td className="px-2 py-1 text-right">{totalReturn !== null ? `${totalReturn >= 0 ? '+' : ''}$${totalReturn.toLocaleString(undefined, {maximumFractionDigits:2})}` : '-'}</td>
-                                        </tr>
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mt-8">Yield on Cost Progression</h4>
-                                  <div className="overflow-x-auto mt-2">
-                                    <table className="min-w-[400px] text-xs border border-slate-200 rounded-xl">
-                                      <thead className="bg-slate-100">
-                                        <tr>
-                                          <th className="px-2 py-1">Year</th>
-                                          <th className="px-2 py-1">Invested</th>
-                                          <th className="px-2 py-1">Divs (yr)</th>
-                                          <th className="px-2 py-1">Cum Divs</th>
-                                          <th className="px-2 py-1">YoC (yr)</th>
-                                          <th className="px-2 py-1">YoC (cum)</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {stock.annualYoC.map(row => (
-                                          <tr key={row.year}>
-                                            <td className="px-2 py-1 text-center font-bold">{row.year}</td>
-                                            <td className="px-2 py-1 text-right">${row.invested.toLocaleString(undefined, {maximumFractionDigits:0})}</td>
-                                            <td className="px-2 py-1 text-right">${row.divs.toLocaleString(undefined, {maximumFractionDigits:2})}</td>
-                                            <td className="px-2 py-1 text-right">${row.cumDivs.toLocaleString(undefined, {maximumFractionDigits:2})}</td>
-                                            <td className="px-2 py-1 text-right">{row.yocYear.toFixed(2)}%</td>
-                                            <td className="px-2 py-1 text-right">{row.yoc.toFixed(2)}%</td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        };
+                        // ...existing code...
                         </React.Fragment>
                       )) : (
                         <tr>
