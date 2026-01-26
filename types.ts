@@ -11,6 +11,7 @@ export interface Stock {
   id: string;
   ticker: string;
   purchases: Purchase[];
+  currentPrice?: number; // Real-time market price
 }
 
 export interface Dividend {

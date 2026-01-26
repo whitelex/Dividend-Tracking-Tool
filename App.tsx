@@ -1,20 +1,3 @@
-// Fetch current price for a ticker using the backend API
-function useStockPrice(ticker: string | undefined) {
-  const [price, setPrice] = React.useState<number | null>(null);
-  React.useEffect(() => {
-    if (!ticker) return;
-    let cancelled = false;
-    setPrice(null);
-    fetch(`/api/price?ticker=${encodeURIComponent(ticker)}`)
-      .then(r => r.json())
-      .then(data => {
-        if (!cancelled && typeof data.price === 'number') setPrice(data.price);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [ticker]);
-  return price;
-}
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 // Passcode gate helpers
@@ -56,92 +39,6 @@ import {
 import { Stock, Dividend, PortfolioState, ChartData, DividendMonthData, Purchase } from './types.ts';
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
-
-// Expanded stock details with price and performance
-const StockExpandedDetails: React.FC<{ stock: any, deletePurchase: (stockId: string, purchaseId: string) => void }> = ({ stock, deletePurchase }) => {
-  const price = useStockPrice(stock.ticker);
-  const marketValue = price !== null ? price * stock.totalShares : null;
-  const unrealized = marketValue !== null ? marketValue - stock.totalCost : null;
-  const totalReturn = marketValue !== null ? (marketValue + stock.stockDividends - stock.investedCapital) : null;
-  return (
-    <tr>
-      <td colSpan={7} className="px-6 py-4 bg-slate-50/50">
-        <div className="pl-10 space-y-3">
-          <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Purchase History</h4>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-            {stock.purchases.sort((a,b) => b.date.localeCompare(a.date)).map(p => (
-              <div key={p.id} className={`group flex justify-between items-center p-3 border rounded-xl hover:border-indigo-200 hover:bg-indigo-50/20 transition-all ${p.type === 'drip' ? 'border-emerald-100 bg-emerald-50/30' : 'border-slate-100'}`}>
-                <div className="flex flex-col">
-                  <div className="flex items-center space-x-2">
-                    <span className="text-[10px] font-bold text-slate-400">{p.date}</span>
-                    {p.type === 'drip' && <span className="text-[8px] font-black uppercase bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded-full">DRIP</span>}
-                  </div>
-                  <span className="text-sm font-bold text-slate-800">{p.shares.toFixed(4)} sh @ ${p.price.toFixed(2)}</span>
-                </div>
-                <button 
-                  onClick={() => deletePurchase(stock.id, p.id)}
-                  className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-300 hover:text-red-500 transition-all"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </button>
-              </div>
-            ))}
-          </div>
-          <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mt-8">Performance</h4>
-          <div className="overflow-x-auto mt-2">
-            <table className="min-w-[400px] text-xs border border-slate-200 rounded-xl">
-              <tbody>
-                <tr>
-                  <td className="px-2 py-1 font-bold">Current Price</td>
-                  <td className="px-2 py-1 text-right">{price !== null ? `$${price.toFixed(2)}` : <span className="text-slate-400">Loading...</span>}</td>
-                </tr>
-                <tr>
-                  <td className="px-2 py-1 font-bold">Market Value</td>
-                  <td className="px-2 py-1 text-right">{marketValue !== null ? `$${marketValue.toLocaleString(undefined, {maximumFractionDigits:2})}` : '-'}</td>
-                </tr>
-                <tr>
-                  <td className="px-2 py-1 font-bold">Unrealized Gain/Loss</td>
-                  <td className="px-2 py-1 text-right">{unrealized !== null ? `${unrealized >= 0 ? '+' : ''}$${unrealized.toLocaleString(undefined, {maximumFractionDigits:2})}` : '-'}</td>
-                </tr>
-                <tr>
-                  <td className="px-2 py-1 font-bold">Total Return (Divs + Price)</td>
-                  <td className="px-2 py-1 text-right">{totalReturn !== null ? `${totalReturn >= 0 ? '+' : ''}$${totalReturn.toLocaleString(undefined, {maximumFractionDigits:2})}` : '-'}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mt-8">Yield on Cost Progression</h4>
-          <div className="overflow-x-auto mt-2">
-            <table className="min-w-[400px] text-xs border border-slate-200 rounded-xl">
-              <thead className="bg-slate-100">
-                <tr>
-                  <th className="px-2 py-1">Year</th>
-                  <th className="px-2 py-1">Invested</th>
-                  <th className="px-2 py-1">Divs (yr)</th>
-                  <th className="px-2 py-1">Cum Divs</th>
-                  <th className="px-2 py-1">YoC (yr)</th>
-                  <th className="px-2 py-1">YoC (cum)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stock.annualYoC.map(row => (
-                  <tr key={row.year}>
-                    <td className="px-2 py-1 text-center font-bold">{row.year}</td>
-                    <td className="px-2 py-1 text-right">${row.invested.toLocaleString(undefined, {maximumFractionDigits:0})}</td>
-                    <td className="px-2 py-1 text-right">${row.divs.toLocaleString(undefined, {maximumFractionDigits:2})}</td>
-                    <td className="px-2 py-1 text-right">${row.cumDivs.toLocaleString(undefined, {maximumFractionDigits:2})}</td>
-                    <td className="px-2 py-1 text-right">{row.yocYear.toFixed(2)}%</td>
-                    <td className="px-2 py-1 text-right">{row.yoc.toFixed(2)}%</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </td>
-    </tr>
-  );
-};
 
 const App: React.FC = () => {
   const [passcode, setPasscode] = useState(getStoredPasscode());
@@ -227,6 +124,36 @@ const App: React.FC = () => {
     };
   }, [portfolio, isInitialLoad, passcode, publicPasscode]);
 
+  // Fetch stock prices
+  useEffect(() => {
+    if (!passcode || passcode.trim() !== publicPasscode) return;
+    if (portfolio.stocks.length === 0) return;
+
+    const fetchPrices = async () => {
+      try {
+        const tickers = portfolio.stocks.map(s => s.ticker).join(',');
+        const response = await fetch(`/api/price?tickers=${tickers}`);
+        if (!response.ok) return;
+        const prices = await response.json();
+        
+        setPortfolio(prev => ({
+          ...prev,
+          stocks: prev.stocks.map(s => ({
+            ...s,
+            currentPrice: prices[s.ticker] || s.currentPrice
+          }))
+        }));
+      } catch (err) {
+        console.error('Price fetch error:', err);
+      }
+    };
+
+    fetchPrices();
+    // Refresh prices every 5 minutes
+    const interval = setInterval(fetchPrices, 300000);
+    return () => clearInterval(interval);
+  }, [portfolio.stocks.map(s => s.ticker).join(','), passcode, publicPasscode]);
+
 
   // Annual YoC progression for each stock
   function getAnnualYoC(stock: Stock, dividends: Dividend[]) {
@@ -277,6 +204,14 @@ const App: React.FC = () => {
         .reduce((sum, d) => sum + d.amount, 0);
       const yieldOnCost = investedCapital > 0 ? (stockDividends / investedCapital) * 100 : 0;
       const annualYoC = getAnnualYoC(stock, portfolio.dividends);
+      
+      const marketValue = stock.currentPrice 
+        ? totalShares * stock.currentPrice 
+        : totalCost; // Fallback to cost if no price
+      
+      const gainLoss = marketValue - totalCost;
+      const gainLossPercent = totalCost > 0 ? (gainLoss / totalCost) * 100 : 0;
+
       return {
         ...stock,
         totalShares,
@@ -285,14 +220,17 @@ const App: React.FC = () => {
         avgPrice,
         stockDividends,
         yieldOnCost,
-        annualYoC
+        annualYoC,
+        marketValue,
+        gainLoss,
+        gainLossPercent
       };
     });
   }, [portfolio.stocks, portfolio.dividends]);
 
   const totalPortfolioValue = useMemo(() => {
-    // Current value based on cost (since we don't have live price)
-    return stockStats.reduce((sum, s) => sum + s.totalCost, 0);
+    // Current value based on market price or cost fallback
+    return stockStats.reduce((sum, s) => sum + s.marketValue, 0);
   }, [stockStats]);
 
   const totalInvestedCapital = useMemo(() => {
@@ -611,7 +549,9 @@ const App: React.FC = () => {
                         <th className="px-6 py-4">Asset</th>
                         <th className="px-6 py-4 text-right">Shares</th>
                         <th className="px-6 py-4 text-right">Avg Cost</th>
+                        <th className="px-6 py-4 text-right">Price</th>
                         <th className="px-6 py-4 text-right">Total Invested</th>
+                        <th className="px-6 py-4 text-right">Performance</th>
                         <th className="px-6 py-4 text-right">Return from Divs</th>
                         <th className="px-6 py-4 text-center">Actions</th>
                       </tr>
@@ -634,10 +574,19 @@ const App: React.FC = () => {
                             </td>
                             <td className="px-6 py-4 text-right font-medium text-slate-600">{stock.totalShares.toFixed(4)}</td>
                             <td className="px-6 py-4 text-right text-slate-600">${stock.avgPrice.toFixed(2)}</td>
+                            <td className="px-6 py-4 text-right text-slate-900 font-bold">
+                              {stock.currentPrice ? `$${stock.currentPrice.toFixed(2)}` : '-'}
+                            </td>
                             <td className="px-6 py-4 text-right font-bold text-slate-900">
                               <div className="flex flex-col items-end">
                                 <span>${stock.investedCapital.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                                <span className="text-[10px] text-slate-400 font-normal">Total Value: ${stock.totalCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                                <span className="text-[10px] text-slate-400 font-normal">Mkt Value: ${stock.marketValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                              <div className={`flex flex-col items-end font-bold ${stock.gainLoss >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                                <span>{stock.gainLossPercent > 0 ? '+' : ''}{stock.gainLossPercent.toFixed(2)}%</span>
+                                <span className="text-[10px] opacity-75">${stock.gainLoss.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
                               </div>
                             </td>
                             <td className="px-6 py-4 text-right">
@@ -655,13 +604,64 @@ const App: React.FC = () => {
                             </td>
                           </tr>
                           {expandedStockId === stock.id && (
-                            <StockExpandedDetails stock={stock} deletePurchase={deletePurchase} />
+                            <tr>
+                              <td colSpan={9} className="px-6 py-4 bg-slate-50/50">
+                                <div className="pl-10 space-y-3">
+                                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Purchase History</h4>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                                    {stock.purchases.sort((a,b) => b.date.localeCompare(a.date)).map(p => (
+                                      <div key={p.id} className={`group flex justify-between items-center p-3 border rounded-xl hover:border-indigo-200 hover:bg-indigo-50/20 transition-all ${p.type === 'drip' ? 'border-emerald-100 bg-emerald-50/30' : 'border-slate-100'}`}>
+                                        <div className="flex flex-col">
+                                          <div className="flex items-center space-x-2">
+                                            <span className="text-[10px] font-bold text-slate-400">{p.date}</span>
+                                            {p.type === 'drip' && <span className="text-[8px] font-black uppercase bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded-full">DRIP</span>}
+                                          </div>
+                                          <span className="text-sm font-bold text-slate-800">{p.shares.toFixed(4)} sh @ ${p.price.toFixed(2)}</span>
+                                        </div>
+                                        <button 
+                                          onClick={() => deletePurchase(stock.id, p.id)}
+                                          className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-300 hover:text-red-500 transition-all"
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mt-8">Yield on Cost Progression</h4>
+                                  <div className="overflow-x-auto mt-2">
+                                    <table className="min-w-[400px] text-xs border border-slate-200 rounded-xl">
+                                      <thead className="bg-slate-100">
+                                        <tr>
+                                          <th className="px-2 py-1">Year</th>
+                                          <th className="px-2 py-1">Invested</th>
+                                          <th className="px-2 py-1">Divs (yr)</th>
+                                          <th className="px-2 py-1">Cum Divs</th>
+                                          <th className="px-2 py-1">YoC (yr)</th>
+                                          <th className="px-2 py-1">YoC (cum)</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {stock.annualYoC.map(row => (
+                                          <tr key={row.year}>
+                                            <td className="px-2 py-1 text-center font-bold">{row.year}</td>
+                                            <td className="px-2 py-1 text-right">${row.invested.toLocaleString(undefined, {maximumFractionDigits:0})}</td>
+                                            <td className="px-2 py-1 text-right">${row.divs.toLocaleString(undefined, {maximumFractionDigits:2})}</td>
+                                            <td className="px-2 py-1 text-right">${row.cumDivs.toLocaleString(undefined, {maximumFractionDigits:2})}</td>
+                                            <td className="px-2 py-1 text-right">{row.yocYear.toFixed(2)}%</td>
+                                            <td className="px-2 py-1 text-right">{row.yoc.toFixed(2)}%</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
                           )}
-                        // ...existing code...
                         </React.Fragment>
                       )) : (
                         <tr>
-                          <td colSpan={7} className="px-6 py-20 text-center text-slate-300 italic">
+                          <td colSpan={9} className="px-6 py-20 text-center text-slate-300 italic">
                             <Wallet className="h-12 w-12 mx-auto mb-4 opacity-20" />
                             <p className="text-lg">Your portfolio is currently empty.</p>
                             <p className="text-sm">Click "Add Purchase" to track your first asset.</p>
