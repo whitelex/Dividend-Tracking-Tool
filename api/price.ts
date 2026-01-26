@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import yahooFinance from 'yahoo-finance2';
+import YahooFinance from 'yahoo-finance2';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
@@ -11,6 +11,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const tickerList = tickers.split(',').map(t => t.trim().toUpperCase());
+  const yahooFinance = new YahooFinance();
 
   try {
     const results: Record<string, number> = {};
