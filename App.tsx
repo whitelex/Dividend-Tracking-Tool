@@ -245,6 +245,7 @@ const App: React.FC = () => {
     reassignToId: string;
   } | null>(null);
   const [transferTargets, setTransferTargets] = useState<Record<string, string>>({});
+  const [allocationMode, setAllocationMode] = useState<'stock' | 'broker'>('stock');
 
   const saveTimeoutRef = useRef<number | null>(null);
 
@@ -450,7 +451,7 @@ const App: React.FC = () => {
     [visibleDividends]
   );
 
-  const allocationData: ChartData[] = useMemo(() => (
+  const stockAllocationData: ChartData[] = useMemo(() => (
     stockStats.map(stock => ({
       name: selectedAccount || !stock.account ? stock.ticker : `${stock.ticker} (${getAccountDisplayName(stock.account)})`,
       value: stock.marketValue,
@@ -475,6 +476,8 @@ const App: React.FC = () => {
       .sort((left, right) => right.date.localeCompare(left.date))
       .slice(0, 8)
   ), [visibleDividends]);
+
+  const totalPayouts = visibleDividends.length;
 
   const accountSummaries = useMemo(() => (
     portfolio.brokerAccounts.map(account => {
@@ -507,6 +510,24 @@ const App: React.FC = () => {
     () => accountSummaries.reduce((sum, summary) => sum + summary.marketValue, 0),
     [accountSummaries]
   );
+
+  const brokerAllocationData: ChartData[] = useMemo(() => {
+    const source = selectedAccount
+      ? accountSummaries.filter(summary => summary.account.id === selectedAccount.id)
+      : accountSummaries;
+
+    return source.map(summary => ({
+      name: getAccountDisplayName(summary.account),
+      value: summary.marketValue,
+    }));
+  }, [accountSummaries, selectedAccount]);
+
+  const allocationData = allocationMode === 'broker' ? brokerAllocationData : stockAllocationData;
+
+  const heroTitle = selectedAccount ? getAccountDisplayName(selectedAccount) : 'Consolidated Portfolio';
+  const heroSubtitle = selectedAccount
+    ? `${selectedAccount.institution} ${selectedAccount.type} dividend holdings and account-level income.`
+    : 'Aggregated view of all your brokerage holdings, dividends, and asset allocations in one place.';
 
   const openPurchaseModal = () => {
     const defaultAccountId = activeAccountId === ALL_ACCOUNTS_ID
@@ -771,63 +792,50 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-12">
-      <nav className="bg-indigo-700 text-white p-4 shadow-xl sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto flex flex-col gap-4 xl:flex-row xl:justify-between xl:items-center">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center space-x-2">
-              <TrendingUp className="h-8 w-8 text-indigo-200" />
-              <h1 className="text-2xl font-bold tracking-tight text-white">
-                DiviTrack <span className="text-indigo-200">Pro</span>
-              </h1>
+    <div className="min-h-screen bg-[#f4f7fb] pb-12 text-slate-900">
+      <nav className="bg-[linear-gradient(90deg,#5142da_0%,#4f46e5_50%,#4c3fcf_100%)] text-white shadow-xl sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-3 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-2xl bg-white/12 border border-white/15 flex items-center justify-center shadow-inner">
+              <TrendingUp className="h-5 w-5 text-white" />
             </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-black tracking-tight text-white">DiviTrack Pro</h1>
+                <span className="px-2 py-0.5 rounded-full bg-white/12 border border-white/10 text-[10px] font-black uppercase tracking-[0.16em] text-indigo-100">
+                  Multi-Broker
+                </span>
+              </div>
+              <p className="text-xs text-indigo-100/80 font-semibold">Dividend &amp; Portfolio Tracking</p>
+            </div>
+          </div>
 
-            <div className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center transition-colors ${
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3 justify-start xl:justify-end">
+            <div className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-[0.18em] flex items-center transition-colors ${
               syncStatus === 'saved'
-                ? 'bg-indigo-600 text-indigo-100'
+                ? 'bg-white/12 text-white'
                 : syncStatus === 'saving' || syncStatus === 'loading'
-                  ? 'bg-indigo-500 text-white'
+                  ? 'bg-white/16 text-white'
                   : 'bg-red-500 text-white'
             }`}>
               {(syncStatus === 'loading' || syncStatus === 'saving') && <RefreshCw className="h-3 w-3 mr-1 animate-spin" />}
               {syncStatus === 'saved' && <Cloud className="h-3 w-3 mr-1" />}
               {syncStatus === 'error' && <CloudOff className="h-3 w-3 mr-1" />}
-              {syncStatus.toUpperCase()}
+              {syncStatus}
             </div>
-
-            <div className="text-xs text-indigo-100/90 font-semibold">
-              {selectedAccount ? `${getAccountDisplayName(selectedAccount)} view` : 'Consolidated across all broker accounts'}
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-3">
-            <button
-              disabled={syncStatus === 'loading'}
-              onClick={() => setIsAccountModalOpen(true)}
-              className="bg-indigo-600 text-white border border-indigo-500 px-4 py-2 rounded-xl font-bold flex items-center hover:bg-indigo-500 transition-all active:scale-95 disabled:opacity-50"
-            >
-              <Building2 className="h-4 w-4 mr-2" /> Add Account
-            </button>
-            <button
-              disabled={syncStatus === 'loading'}
-              onClick={() => setIsManageAccountsOpen(true)}
-              className="bg-white/10 text-white px-4 py-2 rounded-xl font-bold flex items-center hover:bg-white/20 transition-all active:scale-95 disabled:opacity-50"
-            >
-              <Settings2 className="h-4 w-4 mr-2" /> Manage Accounts
-            </button>
             <button
               disabled={syncStatus === 'loading'}
               onClick={openPurchaseModal}
-              className="bg-white text-indigo-700 px-4 py-2 rounded-xl font-bold flex items-center shadow-md hover:bg-indigo-50 transition-all active:scale-95 disabled:opacity-50"
+              className="bg-white text-indigo-700 px-4 py-2.5 rounded-full font-black text-sm flex items-center shadow-sm hover:bg-indigo-50 transition-all active:scale-95 disabled:opacity-50"
             >
-              <Plus className="h-4 w-4 mr-2" /> Add Purchase
+              <Plus className="h-4 w-4 mr-2" /> ADD BUY
             </button>
             <button
               disabled={syncStatus === 'loading' || dividendStockOptions.length === 0}
               onClick={openDividendModal}
-              className="bg-emerald-600 text-white border border-emerald-500 px-4 py-2 rounded-xl font-bold flex items-center hover:bg-emerald-500 transition-all active:scale-95 disabled:opacity-50"
+              className="bg-emerald-500 text-white px-4 py-2.5 rounded-full font-black text-sm flex items-center shadow-sm hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50"
             >
-              <DollarSign className="h-4 w-4 mr-2" /> Log Div
+              <DollarSign className="h-4 w-4 mr-2" /> LOG DIV
             </button>
           </div>
         </div>
@@ -839,172 +847,166 @@ const App: React.FC = () => {
           <p className="text-slate-400 font-medium">Connecting to your portfolio...</p>
         </div>
       ) : (
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 animate-in fade-in duration-700 space-y-8">
-          <section className="bg-white rounded-3xl shadow-sm border border-slate-200 p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Broker Account Switcher</p>
-                <h2 className="text-lg font-bold text-slate-900">Single-click account context</h2>
-              </div>
-              <p className="text-xs text-slate-400 font-semibold">Balances, positions, charts, and income update instantly.</p>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-              <button
-                onClick={() => setActiveAccountId(ALL_ACCOUNTS_ID)}
-                className={`text-left rounded-2xl border p-4 transition-all ${
-                  activeAccountId === ALL_ACCOUNTS_ID
-                    ? 'border-indigo-500 bg-indigo-50 shadow-sm'
-                    : 'border-slate-200 hover:border-indigo-200 hover:bg-slate-50'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <p className="text-sm font-black text-slate-900">All Accounts</p>
-                    <p className="text-[11px] uppercase tracking-widest text-indigo-500 font-bold">Consolidated Portfolio</p>
-                  </div>
-                  <span className="px-2.5 py-1 rounded-full bg-slate-900 text-white text-[10px] font-black">
-                    {portfolio.stocks.length} positions
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-2xl font-black text-slate-900">{formatCurrency(totalAccountMarketValue)}</span>
-                  <span className="px-3 py-1 rounded-full bg-indigo-100 text-indigo-700 text-xs font-black">
-                    {portfolio.brokerAccounts.length} brokers
-                  </span>
-                </div>
-              </button>
+        <main className="max-w-7xl mx-auto px-3 sm:px-6 mt-4 animate-in fade-in duration-700 space-y-5">
+          <section className="bg-white/90 backdrop-blur rounded-[24px] border border-slate-200 px-4 py-3 shadow-sm overflow-hidden">
+            <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <p className="text-[11px] uppercase tracking-[0.18em] font-black text-slate-400 shrink-0">Brokers:</p>
+                <div className="flex items-center gap-2 overflow-x-auto pb-1 min-w-0">
+                  <button
+                    onClick={() => setActiveAccountId(ALL_ACCOUNTS_ID)}
+                    className={`shrink-0 rounded-2xl px-4 py-2.5 border flex items-center gap-3 transition-all ${
+                      activeAccountId === ALL_ACCOUNTS_ID
+                        ? 'bg-[linear-gradient(135deg,#5b4ff0_0%,#4f46e5_100%)] border-indigo-500 text-white shadow-md'
+                        : 'bg-white border-slate-200 text-slate-700 hover:border-indigo-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Wallet className={`h-3.5 w-3.5 ${activeAccountId === ALL_ACCOUNTS_ID ? 'text-indigo-100' : 'text-slate-400'}`} />
+                      <span className="font-black text-sm">All Accounts</span>
+                    </div>
+                    <span className={`text-xs font-black px-2 py-1 rounded-xl ${activeAccountId === ALL_ACCOUNTS_ID ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                      {formatCurrency(totalAccountMarketValue, 0)}
+                    </span>
+                  </button>
 
-              {accountSummaries.map(summary => (
-                <button
-                  key={summary.account.id}
-                  onClick={() => setActiveAccountId(summary.account.id)}
-                  className={`text-left rounded-2xl border p-4 transition-all ${
-                    activeAccountId === summary.account.id
-                      ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
-                      : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3 mb-3">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="h-3 w-3 rounded-full" style={{ backgroundColor: summary.account.color }} />
-                        <p className={`text-sm font-black ${activeAccountId === summary.account.id ? 'text-white' : 'text-slate-900'}`}>
+                  {accountSummaries.map(summary => (
+                    <button
+                      key={summary.account.id}
+                      onClick={() => setActiveAccountId(summary.account.id)}
+                      className={`shrink-0 rounded-2xl px-4 py-2.5 border flex items-center gap-3 transition-all ${
+                        activeAccountId === summary.account.id
+                          ? 'border-slate-900 bg-slate-900 text-white shadow-md'
+                          : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
+                      }`}
+                    >
+                      <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: summary.account.color }} />
+                      <div className="text-left min-w-0">
+                        <p className={`font-black text-sm truncate max-w-40 ${activeAccountId === summary.account.id ? 'text-white' : 'text-slate-800'}`}>
                           {getAccountDisplayName(summary.account)}
                         </p>
                       </div>
-                      <p className={`text-[11px] uppercase tracking-widest font-bold ${activeAccountId === summary.account.id ? 'text-slate-300' : 'text-slate-400'}`}>
-                        {summary.account.institution} • {summary.account.type}
-                      </p>
-                    </div>
-                    <span
-                      className="px-2.5 py-1 rounded-full text-[10px] font-black"
-                      style={{ backgroundColor: activeAccountId === summary.account.id ? 'rgba(255,255,255,0.14)' : `${summary.account.color}1A`, color: activeAccountId === summary.account.id ? '#ffffff' : summary.account.color }}
-                    >
-                      {summary.positions} positions
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <span className={`text-2xl font-black ${activeAccountId === summary.account.id ? 'text-white' : 'text-slate-900'}`}>
-                      {formatCurrency(summary.marketValue)}
-                    </span>
-                    <span className={`px-3 py-1 rounded-full text-xs font-black ${activeAccountId === summary.account.id ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-600'}`}>
-                      YoC {summary.yieldOnCost.toFixed(2)}%
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Portfolio Value</p>
-              <p className="text-2xl font-black text-slate-900">{formatCurrency(totalPortfolioValue)}</p>
-            </div>
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Total Dividends</p>
-              <p className="text-2xl font-black text-emerald-600">{formatCurrency(totalDividends)}</p>
-            </div>
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Yield on Invested</p>
-              <p className="text-2xl font-black text-indigo-600">
-                {totalInvestedCapital > 0 ? ((totalDividends / totalInvestedCapital) * 100).toFixed(2) : '0.00'}%
-              </p>
-              <p className="text-[10px] text-slate-400 font-bold mt-1">
-                on {formatCurrency(totalInvestedCapital, 0)} cash invested
-              </p>
-            </div>
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Positions</p>
-              <p className="text-2xl font-black text-slate-900">{stockStats.length}</p>
-            </div>
-          </section>
-
-          {activeAccountId === ALL_ACCOUNTS_ID && portfolio.brokerAccounts.length > 0 && (
-            <section className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Broker Account Breakdown</p>
-                  <h2 className="text-lg font-bold text-slate-900">Capital allocation and yield by brokerage</h2>
+                      <span className={`text-xs font-black px-2 py-1 rounded-xl ${activeAccountId === summary.account.id ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                        {formatCurrency(summary.marketValue, 0)}
+                      </span>
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              <div className="space-y-4">
-                {accountSummaries.map(summary => {
-                  const allocationPercent = totalAccountMarketValue > 0 ? (summary.marketValue / totalAccountMarketValue) * 100 : 0;
-                  return (
-                    <div key={summary.account.id} className="rounded-2xl border border-slate-200 p-4">
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-3">
-                        <div className="flex items-center gap-3">
-                          <span className="h-4 w-4 rounded-full" style={{ backgroundColor: summary.account.color }} />
-                          <div>
-                            <p className="font-black text-slate-900">{getAccountDisplayName(summary.account)}</p>
-                            <p className="text-[11px] uppercase tracking-widest text-slate-400 font-bold">
-                              {summary.account.institution} • {summary.account.type}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                          <div>
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Balance</p>
-                            <p className="font-black text-slate-900">{formatCurrency(summary.marketValue)}</p>
-                          </div>
-                          <div>
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Invested</p>
-                            <p className="font-black text-slate-900">{formatCurrency(summary.investedCapital)}</p>
-                          </div>
-                          <div>
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Dividends</p>
-                            <p className="font-black text-emerald-600">{formatCurrency(summary.totalDividends)}</p>
-                          </div>
-                          <div>
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Yield</p>
-                            <p className="font-black text-indigo-600">{summary.yieldOnCost.toFixed(2)}%</p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-4">
-                        <div className="flex-1 h-3 rounded-full bg-slate-100 overflow-hidden">
-                          <div className="h-full rounded-full" style={{ width: `${allocationPercent}%`, backgroundColor: summary.account.color }} />
-                        </div>
-                        <span className="text-sm font-black text-slate-600 min-w-20 text-right">{allocationPercent.toFixed(1)}%</span>
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="flex flex-wrap gap-2 xl:justify-end">
+                <button
+                  disabled={syncStatus === 'loading'}
+                  onClick={() => setIsAccountModalOpen(true)}
+                  className="bg-indigo-50 text-indigo-700 border border-indigo-100 px-4 py-2.5 rounded-2xl font-black text-sm flex items-center hover:bg-indigo-100 transition-all disabled:opacity-50"
+                >
+                  <Plus className="h-4 w-4 mr-2" /> Add Broker
+                </button>
+                <button
+                  disabled={syncStatus === 'loading'}
+                  onClick={() => setIsManageAccountsOpen(true)}
+                  className="bg-white text-slate-700 border border-slate-200 px-4 py-2.5 rounded-2xl font-black text-sm flex items-center hover:bg-slate-50 transition-all disabled:opacity-50"
+                >
+                  <Settings2 className="h-4 w-4 mr-2" /> Manage
+                </button>
               </div>
-            </section>
-          )}
+            </div>
+          </section>
 
-          <section className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+          <section className="rounded-[28px] bg-[radial-gradient(circle_at_top_left,#1f2f5f_0%,#111a37_55%,#0c132b_100%)] text-white px-6 py-6 shadow-[0_20px_50px_rgba(17,24,39,0.18)]">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
+              <div>
+                <div className="flex flex-wrap items-center gap-3 mb-2">
+                  <h2 className="text-3xl font-black tracking-tight">{heroTitle}</h2>
+                  <span className="rounded-full bg-indigo-400/20 text-indigo-100 border border-indigo-300/20 px-3 py-1 text-xs font-black">
+                    {portfolio.brokerAccounts.length} Broker Accounts
+                  </span>
+                </div>
+                <p className="text-sm text-slate-300 max-w-2xl">{heroSubtitle}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-6 lg:gap-10">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Yield on Cost</p>
+                  <p className="text-3xl font-black text-emerald-300">
+                    {totalInvestedCapital > 0 ? ((totalDividends / totalInvestedCapital) * 100).toFixed(2) : '0.00'}%
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Total Dividends</p>
+                  <p className="text-3xl font-black text-white">{formatCurrency(totalDividends)}</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div className="bg-white px-5 py-5 rounded-[24px] shadow-sm border border-slate-200">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.16em] mb-2">Total Portfolio Value</p>
+                  <p className="text-[2rem] leading-none font-black text-slate-900">{formatCurrency(totalPortfolioValue)}</p>
+                  <p className="text-xs text-slate-400 mt-3">All combined broker balances</p>
+                </div>
+                <div className="h-9 w-9 rounded-2xl bg-indigo-50 text-indigo-500 flex items-center justify-center"><TrendingUp className="h-4 w-4" /></div>
+              </div>
+            </div>
+            <div className="bg-white px-5 py-5 rounded-[24px] shadow-sm border border-slate-200">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.16em] mb-2">Total Dividends</p>
+                  <p className="text-[2rem] leading-none font-black text-emerald-500">{formatCurrency(totalDividends)}</p>
+                  <p className="text-xs text-slate-400 mt-3">Cumulative payouts received</p>
+                </div>
+                <div className="h-9 w-9 rounded-2xl bg-emerald-50 text-emerald-500 flex items-center justify-center"><DollarSign className="h-4 w-4" /></div>
+              </div>
+            </div>
+            <div className="bg-white px-5 py-5 rounded-[24px] shadow-sm border border-slate-200">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.16em] mb-2">Yield on Cost</p>
+                  <p className="text-[2rem] leading-none font-black text-indigo-600">
+                    {totalInvestedCapital > 0 ? ((totalDividends / totalInvestedCapital) * 100).toFixed(2) : '0.00'}%
+                  </p>
+                  <p className="text-xs text-slate-400 mt-3">Dividend yield relative to cost basis</p>
+                </div>
+                <div className="h-9 w-9 rounded-2xl bg-violet-50 text-violet-500 flex items-center justify-center"><PieChartIcon className="h-4 w-4" /></div>
+              </div>
+            </div>
+            <div className="bg-white px-5 py-5 rounded-[24px] shadow-sm border border-slate-200">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.16em] mb-2">Active Holdings</p>
+                  <p className="text-[2rem] leading-none font-black text-slate-900">{stockStats.length}</p>
+                  <p className="text-xs text-slate-400 mt-3">Across {selectedAccount ? getAccountDisplayName(selectedAccount) : 'all broker accounts'}</p>
+                </div>
+                <div className="h-9 w-9 rounded-2xl bg-slate-100 text-slate-500 flex items-center justify-center"><Building2 className="h-4 w-4" /></div>
+              </div>
+            </div>
+          </section>
+
+          <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-white p-6 rounded-[26px] shadow-sm border border-slate-200">
               <h2 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
                 <PieChartIcon className="h-5 w-5 mr-2 text-indigo-500" />
-                Capital Allocation {selectedAccount ? `• ${getAccountDisplayName(selectedAccount)}` : '• All Accounts'}
+                Capital Allocation
               </h2>
+              <div className="flex items-center gap-2 mb-6">
+                <button
+                  type="button"
+                  onClick={() => setAllocationMode('stock')}
+                  className={`px-3 py-1.5 rounded-full text-xs font-black transition-colors ${allocationMode === 'stock' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  By Stock
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAllocationMode('broker')}
+                  className={`px-3 py-1.5 rounded-full text-xs font-black transition-colors ${allocationMode === 'broker' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  By Broker
+                </button>
+              </div>
               <div className="h-64">
                 {allocationData.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
@@ -1014,7 +1016,7 @@ const App: React.FC = () => {
                         cx="50%"
                         cy="50%"
                         innerRadius={60}
-                        outerRadius={80}
+                        outerRadius={84}
                         paddingAngle={5}
                         dataKey="value"
                       >
@@ -1034,19 +1036,22 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-              <h2 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
-                <History className="h-5 w-5 mr-2 text-indigo-500" />
-                Monthly Dividend History {selectedAccount ? `• ${getAccountDisplayName(selectedAccount)}` : '• All Accounts'}
-              </h2>
+            <div className="bg-white p-6 rounded-[26px] shadow-sm border border-slate-200">
+              <div className="flex items-center justify-between mb-6 gap-3">
+                <h2 className="text-lg font-bold text-slate-800 flex items-center">
+                  <History className="h-5 w-5 mr-2 text-indigo-500" />
+                  Dividend Income History
+                </h2>
+                <span className="text-xs font-black text-slate-300">{totalPayouts} payouts</span>
+              </div>
               <div className="h-64">
                 {monthlyDividendData.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={monthlyDividendData}>
+                    <BarChart data={monthlyDividendData} barCategoryGap="20%">
                       <XAxis dataKey="month" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
                       <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
                       <Tooltip cursor={{ fill: '#f8fafc' }} formatter={(value: number) => `$${value.toFixed(2)}`} />
-                      <Bar dataKey="amount" fill="#6366f1" radius={[6, 6, 0, 0]} />
+                      <Bar dataKey="amount" fill="#4f46e5" radius={[8, 8, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
@@ -1058,33 +1063,33 @@ const App: React.FC = () => {
             </div>
           </section>
 
-          <section className="space-y-8">
-            <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+          <section className={`grid gap-4 ${activeAccountId === ALL_ACCOUNTS_ID ? 'xl:grid-cols-[1.95fr_0.95fr]' : 'grid-cols-1'}`}>
+            <div className="bg-white rounded-[26px] shadow-sm border border-slate-200 overflow-hidden">
               <div className="p-6 border-b border-slate-100 flex flex-col gap-3 lg:flex-row lg:justify-between lg:items-center">
                 <div>
-                  <h2 className="text-lg font-bold text-slate-800">Your Portfolio</h2>
+                  <h2 className="text-2xl font-black text-slate-800">{selectedAccount ? `${getAccountDisplayName(selectedAccount)} Holdings` : 'All Holdings'}</h2>
                   <p className="text-sm text-slate-400">
                     {selectedAccount
-                      ? `Showing holdings for ${getAccountDisplayName(selectedAccount)}.`
-                      : 'Showing holdings across all broker accounts.'}
+                      ? `View of holdings and income for ${getAccountDisplayName(selectedAccount)}.`
+                      : 'Consolidated view across all broker accounts.'}
                   </p>
                 </div>
-                <div className="flex items-center text-slate-400 text-xs">
-                  <Calendar className="h-3 w-3 mr-1" /> Last updated: {new Date().toLocaleDateString()}
+                <div className="flex items-center gap-3 text-slate-400 text-xs font-black uppercase tracking-[0.18em]">
+                  <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-500 normal-case tracking-normal text-sm font-bold">{stockStats.length} Holdings</span>
+                  <div className="flex items-center"><Calendar className="h-3 w-3 mr-1" /> {new Date().toLocaleDateString()}</div>
                 </div>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
-                  <thead className="bg-slate-50 text-slate-500 text-xs font-bold uppercase tracking-wider">
+                  <thead className="bg-slate-50 text-slate-500 text-[11px] font-black uppercase tracking-[0.16em]">
                     <tr>
                       <th className="px-6 py-4 w-10"></th>
                       <th className="px-6 py-4">Asset</th>
+                      {!selectedAccount && <th className="px-6 py-4">Broker Account</th>}
                       <th className="px-6 py-4 text-right">Shares</th>
                       <th className="px-6 py-4 text-right">Avg Cost</th>
-                      <th className="px-6 py-4 text-right">Price</th>
                       <th className="px-6 py-4 text-right">Total Invested</th>
-                      <th className="px-6 py-4 text-right">Performance</th>
-                      <th className="px-6 py-4 text-right">Return from Divs</th>
+                      <th className="px-6 py-4 text-right">Yield on Cost</th>
                       <th className="px-6 py-4 text-center">Actions</th>
                     </tr>
                   </thead>
@@ -1095,52 +1100,36 @@ const App: React.FC = () => {
                           className={`hover:bg-slate-50 transition-colors cursor-pointer ${expandedStockId === stock.id ? 'bg-indigo-50/30' : ''}`}
                           onClick={() => setExpandedStockId(expandedStockId === stock.id ? null : stock.id)}
                         >
-                          <td className="px-6 py-4">
+                          <td className="px-6 py-5">
                             {expandedStockId === stock.id
                               ? <ChevronDown className="h-4 w-4 text-indigo-500" />
                               : <ChevronRight className="h-4 w-4 text-slate-300" />}
                           </td>
-                          <td className="px-6 py-4">
-                            <div className="flex flex-col gap-2">
-                              <span className="font-black text-slate-900">{stock.ticker}</span>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="text-[10px] text-indigo-500 font-bold uppercase">{stock.purchases.length} transactions</span>
-                                {!selectedAccount && stock.account && (
-                                  <span
-                                    className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black"
-                                    style={{ backgroundColor: `${stock.account.color}1A`, color: stock.account.color }}
-                                  >
-                                    {getAccountDisplayName(stock.account)}
-                                  </span>
-                                )}
-                              </div>
+                          <td className="px-6 py-5">
+                            <div className="flex flex-col gap-1">
+                              <span className="font-black text-slate-900 text-base">{stock.ticker}</span>
+                              <span className="text-[10px] text-indigo-500 font-black uppercase tracking-[0.16em]">{stock.purchases.length} buys</span>
                             </div>
                           </td>
-                          <td className="px-6 py-4 text-right font-medium text-slate-600">{stock.totalShares.toFixed(4)}</td>
-                          <td className="px-6 py-4 text-right text-slate-600">${stock.avgPrice.toFixed(2)}</td>
-                          <td className="px-6 py-4 text-right text-slate-900 font-bold">
-                            {stock.currentPrice ? `$${stock.currentPrice.toFixed(2)}` : '-'}
-                          </td>
-                          <td className="px-6 py-4 text-right font-bold text-slate-900">
-                            <div className="flex flex-col items-end">
-                              <span>{formatCurrency(stock.investedCapital)}</span>
-                              <span className="text-[10px] text-slate-400 font-normal">
-                                Mkt Value: {formatCurrency(stock.marketValue, 0)}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <div className={`flex flex-col items-end font-bold ${stock.gainLoss >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                              <span>{stock.gainLossPercent > 0 ? '+' : ''}{stock.gainLossPercent.toFixed(2)}%</span>
-                              <span className="text-[10px] opacity-75">${stock.gainLoss.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${stock.yieldOnCost > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                          {!selectedAccount && (
+                            <td className="px-6 py-5">
+                              {stock.account && (
+                                <span className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-black" style={{ backgroundColor: `${stock.account.color}16`, color: stock.account.color }}>
+                                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: stock.account.color }} />
+                                  {getAccountDisplayName(stock.account)}
+                                </span>
+                              )}
+                            </td>
+                          )}
+                          <td className="px-6 py-5 text-right font-semibold text-slate-700">{stock.totalShares.toFixed(2)}</td>
+                          <td className="px-6 py-5 text-right font-semibold text-slate-600">${stock.avgPrice.toFixed(2)}</td>
+                          <td className="px-6 py-5 text-right font-black text-slate-900">{formatCurrency(stock.investedCapital)}</td>
+                          <td className="px-6 py-5 text-right">
+                            <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-black ${stock.yieldOnCost > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
                               {stock.yieldOnCost.toFixed(2)}%
                             </span>
                           </td>
-                          <td className="px-6 py-4 text-center">
+                          <td className="px-6 py-5 text-center">
                             <button
                               onClick={e => {
                                 e.stopPropagation();
@@ -1154,7 +1143,7 @@ const App: React.FC = () => {
                         </tr>
                         {expandedStockId === stock.id && (
                           <tr>
-                            <td colSpan={9} className="px-6 py-4 bg-slate-50/50">
+                            <td colSpan={selectedAccount ? 7 : 8} className="px-6 py-4 bg-slate-50/50">
                               <div className="pl-10 space-y-5">
                                 {portfolio.brokerAccounts.length > 1 && (
                                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
@@ -1247,7 +1236,7 @@ const App: React.FC = () => {
                       </React.Fragment>
                     )) : (
                       <tr>
-                        <td colSpan={9} className="px-6 py-20 text-center text-slate-300 italic">
+                        <td colSpan={selectedAccount ? 7 : 8} className="px-6 py-20 text-center text-slate-300 italic">
                           <Wallet className="h-12 w-12 mx-auto mb-4 opacity-20" />
                           <p className="text-lg">No holdings in this view yet.</p>
                           <p className="text-sm">Click Add Purchase to track your next position.</p>
@@ -1259,43 +1248,85 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6">
-              <h2 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
-                <History className="h-5 w-5 mr-2 text-indigo-500" /> Recent Income
-              </h2>
-              <div className="space-y-3">
-                {recentDividends.map(dividend => {
-                  const account = accountMap.get(dividend.accountId);
-                  return (
-                    <div key={dividend.id} className="flex justify-between items-center p-4 rounded-2xl border border-slate-50 bg-slate-50/50 hover:bg-slate-50 transition-colors">
-                      <div className="flex items-center gap-4">
-                        <div className="h-10 w-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
-                          <DollarSign className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="font-black text-slate-900">{dividend.ticker}</p>
-                            {account && (
-                              <span
-                                className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black"
-                                style={{ backgroundColor: `${account.color}1A`, color: account.color }}
-                              >
-                                {getAccountDisplayName(account)}
-                              </span>
-                            )}
+            {activeAccountId === ALL_ACCOUNTS_ID ? (
+              <div className="bg-white rounded-[26px] shadow-sm border border-slate-200 p-6">
+                <div className="flex items-start justify-between mb-6 gap-3">
+                  <div>
+                    <h2 className="text-2xl font-black text-slate-800">Broker Account Breakdown</h2>
+                    <p className="text-sm text-slate-400">Capital allocation and yield across each brokerage.</p>
+                  </div>
+                  <div className="text-right text-xs font-black text-slate-400">
+                    <div>{portfolio.brokerAccounts.length} active</div>
+                    <div>accounts</div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {accountSummaries.map(summary => {
+                    const allocationPercent = totalAccountMarketValue > 0 ? (summary.marketValue / totalAccountMarketValue) * 100 : 0;
+                    return (
+                      <div key={summary.account.id} className="rounded-3xl border border-slate-200 p-4">
+                        <div className="flex items-start justify-between gap-4 mb-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: summary.account.color }} />
+                              <p className="font-black text-slate-900 truncate">{getAccountDisplayName(summary.account)}</p>
+                              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">{summary.account.institution}</span>
+                            </div>
+                            <p className="text-xs text-slate-400">{allocationPercent.toFixed(1)}% of portfolio • {summary.positions} assets</p>
                           </div>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase">{dividend.date}</p>
+                          <div className="text-right shrink-0">
+                            <p className="font-black text-slate-900">{formatCurrency(summary.marketValue)}</p>
+                            <p className="text-xs font-black text-emerald-500">+{formatCurrency(summary.totalDividends)} divs ({summary.yieldOnCost.toFixed(2)}% YoC)</p>
+                          </div>
+                        </div>
+                        <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                          <div className="h-full rounded-full" style={{ width: `${allocationPercent}%`, backgroundColor: summary.account.color }} />
                         </div>
                       </div>
-                      <p className="font-black text-emerald-600 text-lg">+${dividend.amount.toFixed(2)}</p>
-                    </div>
-                  );
-                })}
-                {recentDividends.length === 0 && (
-                  <p className="text-sm text-slate-300 italic text-center py-6">No income recorded</p>
-                )}
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="bg-white rounded-[26px] shadow-sm border border-slate-200 p-6">
+                <h2 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
+                  <History className="h-5 w-5 mr-2 text-indigo-500" /> Recent Income
+                </h2>
+                <div className="space-y-3">
+                  {recentDividends.map(dividend => {
+                    const account = accountMap.get(dividend.accountId);
+                    return (
+                      <div key={dividend.id} className="flex justify-between items-center p-4 rounded-2xl border border-slate-100 bg-slate-50/60 hover:bg-slate-50 transition-colors">
+                        <div className="flex items-center gap-4">
+                          <div className="h-10 w-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
+                            <DollarSign className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="font-black text-slate-900">{dividend.ticker}</p>
+                              {account && (
+                                <span
+                                  className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black"
+                                  style={{ backgroundColor: `${account.color}1A`, color: account.color }}
+                                >
+                                  {getAccountDisplayName(account)}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase">{dividend.date}</p>
+                          </div>
+                        </div>
+                        <p className="font-black text-emerald-600 text-lg">+${dividend.amount.toFixed(2)}</p>
+                      </div>
+                    );
+                  })}
+                  {recentDividends.length === 0 && (
+                    <p className="text-sm text-slate-300 italic text-center py-6">No income recorded</p>
+                  )}
+                </div>
+              </div>
+            )}
           </section>
         </main>
       )}
