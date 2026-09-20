@@ -7,9 +7,18 @@ export interface Purchase {
   type?: 'buy' | 'drip'; // 'buy' = cash purchase, 'drip' = dividend reinvestment
 }
 
+export interface BrokerAccount {
+  id: string;
+  institution: string;
+  type: string;
+  color: string;
+  nickname: string;
+}
+
 export interface Stock {
   id: string;
   ticker: string;
+  accountId: string;
   purchases: Purchase[];
   currentPrice?: number; // Real-time market price
 }
@@ -17,6 +26,7 @@ export interface Stock {
 export interface Dividend {
   id: string;
   stockId: string;
+  accountId: string;
   ticker: string;
   amount: number;
   date: string;
@@ -25,6 +35,7 @@ export interface Dividend {
 }
 
 export interface PortfolioState {
+  brokerAccounts: BrokerAccount[];
   stocks: Stock[];
   dividends: Dividend[];
 }

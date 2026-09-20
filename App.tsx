@@ -1,51 +1,222 @@
-
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 // Passcode gate helpers
 const getStoredPasscode = () => {
   try {
     return localStorage.getItem('divitrack_passcode') || '';
-  } catch { return ''; }
+  } catch {
+    return '';
+  }
 };
+
 const setStoredPasscode = (val: string) => {
-  try { localStorage.setItem('divitrack_passcode', val); } catch {}
+  try {
+    localStorage.setItem('divitrack_passcode', val);
+  } catch {}
 };
-import { 
-  TrendingUp, 
-  Wallet, 
-  PieChart as PieChartIcon, 
-  Plus, 
-  History, 
-  Trash2,
-  DollarSign,
-  ChevronRight,
-  ChevronDown,
+
+import {
+  ArrowRightLeft,
+  Building2,
   Calendar,
+  ChevronDown,
+  ChevronRight,
   Cloud,
   CloudOff,
-  RefreshCw
+  DollarSign,
+  History,
+  PieChart as PieChartIcon,
+  Plus,
+  RefreshCw,
+  Settings2,
+  Trash2,
+  TrendingUp,
+  Wallet,
 } from 'lucide-react';
-import { 
-  PieChart, 
-  Pie, 
-  Cell, 
-  ResponsiveContainer, 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  Tooltip, 
-  Legend 
+import {
+  Bar,
+  BarChart,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from 'recharts';
-import { Stock, Dividend, PortfolioState, ChartData, DividendMonthData, Purchase } from './types.ts';
+import {
+  BrokerAccount,
+  ChartData,
+  Dividend,
+  DividendMonthData,
+  PortfolioState,
+  Purchase,
+  Stock,
+} from './types.ts';
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+const ACCOUNT_COLOR_OPTIONS = ['#6366f1', '#10b981', '#0f766e', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#0ea5e9'];
+const BROKER_INSTITUTIONS = ['Fidelity', 'Robinhood', 'Charles Schwab', 'Vanguard', 'Interactive Brokers', 'ETRADE', 'Webull', 'M1 Finance', 'Custom'];
+const ACCOUNT_TYPES = ['Taxable', 'Roth IRA', 'Traditional IRA', '401(k)', 'Cash', 'HSA', '529', 'Trust', 'Other'];
+const ALL_ACCOUNTS_ID = 'all-accounts';
+const LEGACY_ACCOUNT_ID = 'default-account';
+
+const generateId = () => Math.random().toString(36).slice(2, 11);
+
+const createDefaultAccount = (): BrokerAccount => ({
+  id: LEGACY_ACCOUNT_ID,
+  institution: 'Custom',
+  type: 'Taxable',
+  color: '#6366f1',
+  nickname: 'Primary Account',
+});
+
+const createEmptyPortfolio = (): PortfolioState => ({
+  brokerAccounts: [createDefaultAccount()],
+  stocks: [],
+  dividends: [],
+});
+
+const createBlankPurchaseForm = (accountId: string) => ({
+  ticker: '',
+  shares: 0,
+  price: 0,
+  date: new Date().toISOString().split('T')[0],
+  accountId,
+});
+
+const createBlankDividendForm = (stockId = '') => ({
+  stockId,
+  amount: 0,
+  date: new Date().toISOString().split('T')[0],
+  reinvested: false,
+  sharePrice: 0,
+  sharesBought: 0,
+});
+
+const createBlankAccountForm = () => ({
+  institution: 'Fidelity',
+  customInstitution: '',
+  type: 'Taxable',
+  color: ACCOUNT_COLOR_OPTIONS[0],
+  nickname: '',
+});
+
+const getAccountDisplayName = (account: BrokerAccount) => account.nickname || `${account.institution} ${account.type}`;
+
+const formatCurrency = (amount: number, minimumFractionDigits = 2) =>
+  `$${amount.toLocaleString(undefined, { minimumFractionDigits, maximumFractionDigits: minimumFractionDigits })}`;
+
+const normalizePortfolioData = (payload: any): PortfolioState => {
+  const brokerAccounts: BrokerAccount[] = Array.isArray(payload?.brokerAccounts) && payload.brokerAccounts.length > 0
+    ? payload.brokerAccounts.map((account: any, index: number) => ({
+        id: account?.id || generateId(),
+        institution: account?.institution || 'Custom',
+        type: account?.type || 'Taxable',
+        color: account?.color || ACCOUNT_COLOR_OPTIONS[index % ACCOUNT_COLOR_OPTIONS.length],
+        nickname: account?.nickname || `${account?.institution || 'Broker'} ${account?.type || 'Account'}`,
+      }))
+    : [createDefaultAccount()];
+
+  const fallbackAccountId = brokerAccounts[0]?.id || LEGACY_ACCOUNT_ID;
+  const accountIds = new Set(brokerAccounts.map(account => account.id));
+
+  const stocks: Stock[] = Array.isArray(payload?.stocks)
+    ? payload.stocks.map((stock: any) => ({
+        id: stock?.id || generateId(),
+        ticker: (stock?.ticker || '').toUpperCase(),
+        accountId: accountIds.has(stock?.accountId) ? stock.accountId : fallbackAccountId,
+        purchases: Array.isArray(stock?.purchases) ? stock.purchases : [],
+        currentPrice: typeof stock?.currentPrice === 'number' ? stock.currentPrice : undefined,
+      }))
+    : [];
+
+  const stockAccountMap = new Map(stocks.map(stock => [stock.id, stock.accountId]));
+
+  const dividends: Dividend[] = Array.isArray(payload?.dividends)
+    ? payload.dividends.map((dividend: any) => ({
+        id: dividend?.id || generateId(),
+        stockId: dividend?.stockId || '',
+        accountId: accountIds.has(dividend?.accountId)
+          ? dividend.accountId
+          : stockAccountMap.get(dividend?.stockId) || fallbackAccountId,
+        ticker: (dividend?.ticker || '').toUpperCase(),
+        amount: Number(dividend?.amount || 0),
+        date: dividend?.date || new Date().toISOString().split('T')[0],
+        reinvested: Boolean(dividend?.reinvested),
+        linkedPurchaseId: dividend?.linkedPurchaseId,
+      }))
+    : [];
+
+  return { brokerAccounts, stocks, dividends };
+};
+
+const moveStockToAccount = (
+  stocks: Stock[],
+  dividends: Dividend[],
+  stockId: string,
+  targetAccountId: string
+) => {
+  const movingStock = stocks.find(stock => stock.id === stockId);
+  if (!movingStock) {
+    return { stocks, dividends };
+  }
+
+  const existingTargetStock = stocks.find(
+    stock => stock.id !== stockId && stock.accountId === targetAccountId && stock.ticker === movingStock.ticker
+  );
+
+  if (!existingTargetStock) {
+    return {
+      stocks: stocks.map(stock => (
+        stock.id === stockId ? { ...stock, accountId: targetAccountId } : stock
+      )),
+      dividends: dividends.map(dividend => (
+        dividend.stockId === stockId ? { ...dividend, accountId: targetAccountId } : dividend
+      )),
+    };
+  }
+
+  return {
+    stocks: stocks
+      .map(stock => {
+        if (stock.id === existingTargetStock.id) {
+          return {
+            ...stock,
+            purchases: [...stock.purchases, ...movingStock.purchases],
+            currentPrice: stock.currentPrice || movingStock.currentPrice,
+          };
+        }
+
+        return stock;
+      })
+      .filter(stock => stock.id !== stockId),
+    dividends: dividends.map(dividend => (
+      dividend.stockId === stockId
+        ? { ...dividend, stockId: existingTargetStock.id, accountId: targetAccountId }
+        : dividend
+    )),
+  };
+};
+
+const reassignAccountHoldings = (
+  stocks: Stock[],
+  dividends: Dividend[],
+  fromAccountId: string,
+  targetAccountId: string
+) => {
+  const stockIdsToMove = stocks.filter(stock => stock.accountId === fromAccountId).map(stock => stock.id);
+
+  return stockIdsToMove.reduce(
+    (current, stockId) => moveStockToAccount(current.stocks, current.dividends, stockId, targetAccountId),
+    { stocks, dividends }
+  );
+};
 
 const App: React.FC = () => {
   const [passcode, setPasscode] = useState(getStoredPasscode());
   const [passcodeInput, setPasscodeInput] = useState('');
   const [passcodeError, setPasscodeError] = useState('');
-  // Ensure passcode is string and trim whitespace
-  // Use Vite env variable directly
   const publicPasscode = (import.meta.env.VITE_PUBLIC_PASSCODE || '').toString().trim();
 
   useEffect(() => {
@@ -54,35 +225,38 @@ const App: React.FC = () => {
     }
   }, [passcode, publicPasscode]);
 
-  const [portfolio, setPortfolio] = useState<PortfolioState>({ stocks: [], dividends: [] });
+  const [portfolio, setPortfolio] = useState<PortfolioState>(createEmptyPortfolio());
+  const [activeAccountId, setActiveAccountId] = useState<string>(ALL_ACCOUNTS_ID);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'loading' | 'saving' | 'saved' | 'error'>('loading');
-  
+
   const [isStockModalOpen, setIsStockModalOpen] = useState(false);
   const [isDivModalOpen, setIsDivModalOpen] = useState(false);
+  const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
+  const [isManageAccountsOpen, setIsManageAccountsOpen] = useState(false);
   const [expandedStockId, setExpandedStockId] = useState<string | null>(null);
 
-  const [newPurchase, setNewPurchase] = useState({ ticker: '', shares: 0, price: 0, date: new Date().toISOString().split('T')[0] });
-  const [newDiv, setNewDiv] = useState({ 
-    stockId: '', 
-    amount: 0, 
-    date: new Date().toISOString().split('T')[0],
-    reinvested: false,
-    sharePrice: 0,
-    sharesBought: 0
-  });
+  const [newPurchase, setNewPurchase] = useState(createBlankPurchaseForm(LEGACY_ACCOUNT_ID));
+  const [newDiv, setNewDiv] = useState(createBlankDividendForm());
+  const [newAccount, setNewAccount] = useState(createBlankAccountForm());
+  const [pendingDeleteAccount, setPendingDeleteAccount] = useState<{
+    accountId: string;
+    mode: 'reassign' | 'delete';
+    reassignToId: string;
+  } | null>(null);
+  const [transferTargets, setTransferTargets] = useState<Record<string, string>>({});
 
-  // Move hooks before any conditional return
+  const saveTimeoutRef = useRef<number | null>(null);
+
   useEffect(() => {
     const fetchData = async () => {
-      // Don't fetch if locked
       if (!passcode || passcode.trim() !== publicPasscode) return;
-      
+
       try {
         const response = await fetch('/api/data');
         if (!response.ok) throw new Error('Failed to fetch');
         const data = await response.json();
-        setPortfolio(data);
+        setPortfolio(normalizePortfolioData(data));
         setSyncStatus('saved');
       } catch (err) {
         console.error('Initial load error:', err);
@@ -91,10 +265,10 @@ const App: React.FC = () => {
         setIsInitialLoad(false);
       }
     };
+
     fetchData();
   }, [passcode, publicPasscode]);
 
-  const saveTimeoutRef = useRef<number | null>(null);
   useEffect(() => {
     if (isInitialLoad) return;
     if (!passcode || passcode.trim() !== publicPasscode) return;
@@ -107,9 +281,9 @@ const App: React.FC = () => {
         const response = await fetch('/api/data', {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
           },
-          body: JSON.stringify(portfolio)
+          body: JSON.stringify(portfolio),
         });
         if (!response.ok) throw new Error('Save failed');
         setSyncStatus('saved');
@@ -124,24 +298,26 @@ const App: React.FC = () => {
     };
   }, [portfolio, isInitialLoad, passcode, publicPasscode]);
 
-  // Fetch stock prices
   useEffect(() => {
     if (!passcode || passcode.trim() !== publicPasscode) return;
     if (portfolio.stocks.length === 0) return;
 
     const fetchPrices = async () => {
       try {
-        const tickers = portfolio.stocks.map(s => s.ticker).join(',');
+        const tickers = Array.from(new Set(portfolio.stocks.map(stock => stock.ticker))).join(',');
+        if (!tickers) return;
+
         const response = await fetch(`/api/price?tickers=${tickers}`);
         if (!response.ok) return;
+
         const prices = await response.json();
-        
+
         setPortfolio(prev => ({
           ...prev,
-          stocks: prev.stocks.map(s => ({
-            ...s,
-            currentPrice: prices[s.ticker] || s.currentPrice
-          }))
+          stocks: prev.stocks.map(stock => ({
+            ...stock,
+            currentPrice: prices[stock.ticker] || stock.currentPrice,
+          })),
         }));
       } catch (err) {
         console.error('Price fetch error:', err);
@@ -149,115 +325,405 @@ const App: React.FC = () => {
     };
 
     fetchPrices();
-    // Refresh prices every 5 minutes
     const interval = setInterval(fetchPrices, 300000);
     return () => clearInterval(interval);
-  }, [portfolio.stocks.map(s => s.ticker).join(','), passcode, publicPasscode]);
+  }, [portfolio.stocks.map(stock => stock.ticker).sort().join(','), passcode, publicPasscode]);
 
+  useEffect(() => {
+    if (activeAccountId !== ALL_ACCOUNTS_ID && !portfolio.brokerAccounts.some(account => account.id === activeAccountId)) {
+      setActiveAccountId(ALL_ACCOUNTS_ID);
+    }
+  }, [activeAccountId, portfolio.brokerAccounts]);
 
-  // Annual YoC progression for each stock
+  const accountMap = useMemo(
+    () => new Map(portfolio.brokerAccounts.map(account => [account.id, account])),
+    [portfolio.brokerAccounts]
+  );
+
+  const selectedAccount = activeAccountId === ALL_ACCOUNTS_ID
+    ? null
+    : portfolio.brokerAccounts.find(account => account.id === activeAccountId) || null;
+
+  const visibleStocks = useMemo(
+    () => activeAccountId === ALL_ACCOUNTS_ID
+      ? portfolio.stocks
+      : portfolio.stocks.filter(stock => stock.accountId === activeAccountId),
+    [activeAccountId, portfolio.stocks]
+  );
+
+  const visibleDividends = useMemo(
+    () => activeAccountId === ALL_ACCOUNTS_ID
+      ? portfolio.dividends
+      : portfolio.dividends.filter(dividend => dividend.accountId === activeAccountId),
+    [activeAccountId, portfolio.dividends]
+  );
+
+  const dividendStockOptions = useMemo(
+    () => visibleStocks.slice().sort((left, right) => left.ticker.localeCompare(right.ticker)),
+    [visibleStocks]
+  );
+
   function getAnnualYoC(stock: Stock, dividends: Dividend[]) {
-    // Get all years from first purchase to current year
     const years = Array.from(new Set([
-      ...stock.purchases.map(p => new Date(p.date).getFullYear()),
-      ...dividends.filter(d => d.stockId === stock.id).map(d => new Date(d.date).getFullYear())
+      ...stock.purchases.map(purchase => new Date(purchase.date).getFullYear()),
+      ...dividends.filter(dividend => dividend.stockId === stock.id).map(dividend => new Date(dividend.date).getFullYear()),
     ])).sort();
+
     if (years.length === 0) return [];
+
     const minYear = Math.min(...years);
     const maxYear = new Date().getFullYear();
     const result = [];
-    for (let year = minYear; year <= maxYear; year++) {
-      // Invested capital up to and including this year (cash only)
+
+    for (let year = minYear; year <= maxYear; year += 1) {
       const invested = stock.purchases
-        .filter(p => (!p.type || p.type === 'buy') && new Date(p.date).getFullYear() <= year)
-        .reduce((sum, p) => sum + (p.shares * p.price), 0);
-      // Dividends received in this year
-      const divs = dividends
-        .filter(d => d.stockId === stock.id && new Date(d.date).getFullYear() === year)
-        .reduce((sum, d) => sum + d.amount, 0);
-      // Cumulative dividends up to this year
-      const cumDivs = dividends
-        .filter(d => d.stockId === stock.id && new Date(d.date).getFullYear() <= year)
-        .reduce((sum, d) => sum + d.amount, 0);
+        .filter(purchase => (!purchase.type || purchase.type === 'buy') && new Date(purchase.date).getFullYear() <= year)
+        .reduce((sum, purchase) => sum + purchase.shares * purchase.price, 0);
+
+      const yearDividends = dividends
+        .filter(dividend => dividend.stockId === stock.id && new Date(dividend.date).getFullYear() === year)
+        .reduce((sum, dividend) => sum + dividend.amount, 0);
+
+      const cumulativeDividends = dividends
+        .filter(dividend => dividend.stockId === stock.id && new Date(dividend.date).getFullYear() <= year)
+        .reduce((sum, dividend) => sum + dividend.amount, 0);
+
       result.push({
         year,
         invested,
-        divs,
-        cumDivs,
-        yoc: invested > 0 ? (cumDivs / invested) * 100 : 0,
-        yocYear: invested > 0 ? (divs / invested) * 100 : 0
+        divs: yearDividends,
+        cumDivs: cumulativeDividends,
+        yoc: invested > 0 ? (cumulativeDividends / invested) * 100 : 0,
+        yocYear: invested > 0 ? (yearDividends / invested) * 100 : 0,
       });
     }
+
     return result;
   }
 
-  const stockStats = useMemo(() => {
-    return portfolio.stocks.map(stock => {
-      const totalShares = stock.purchases.reduce((sum, p) => sum + p.shares, 0);
-      const totalCost = stock.purchases.reduce((sum, p) => sum + (p.shares * p.price), 0);
+  const stockStats = useMemo(() => (
+    visibleStocks.map(stock => {
+      const totalShares = stock.purchases.reduce((sum, purchase) => sum + purchase.shares, 0);
+      const totalCost = stock.purchases.reduce((sum, purchase) => sum + purchase.shares * purchase.price, 0);
       const investedCapital = stock.purchases
-        .filter(p => !p.type || p.type === 'buy')
-        .reduce((sum, p) => sum + (p.shares * p.price), 0);
+        .filter(purchase => !purchase.type || purchase.type === 'buy')
+        .reduce((sum, purchase) => sum + purchase.shares * purchase.price, 0);
       const avgPrice = totalShares > 0 ? totalCost / totalShares : 0;
-      const stockDividends = portfolio.dividends
-        .filter(d => d.stockId === stock.id)
-        .reduce((sum, d) => sum + d.amount, 0);
-      const yieldOnCost = investedCapital > 0 ? (stockDividends / investedCapital) * 100 : 0;
-      const annualYoC = getAnnualYoC(stock, portfolio.dividends);
-      
-      const marketValue = stock.currentPrice 
-        ? totalShares * stock.currentPrice 
-        : totalCost; // Fallback to cost if no price
-      
+      const stockDividends = visibleDividends
+        .filter(dividend => dividend.stockId === stock.id)
+        .reduce((sum, dividend) => sum + dividend.amount, 0);
+      const annualYoC = getAnnualYoC(stock, visibleDividends);
+      const marketValue = stock.currentPrice ? totalShares * stock.currentPrice : totalCost;
       const gainLoss = marketValue - totalCost;
       const gainLossPercent = totalCost > 0 ? (gainLoss / totalCost) * 100 : 0;
+      const account = accountMap.get(stock.accountId) || null;
 
       return {
         ...stock,
+        account,
         totalShares,
         totalCost,
         investedCapital,
         avgPrice,
         stockDividends,
-        yieldOnCost,
         annualYoC,
         marketValue,
         gainLoss,
-        gainLossPercent
+        gainLossPercent,
+        yieldOnCost: investedCapital > 0 ? (stockDividends / investedCapital) * 100 : 0,
       };
-    });
-  }, [portfolio.stocks, portfolio.dividends]);
+    })
+  ), [accountMap, visibleDividends, visibleStocks]);
 
-  const totalPortfolioValue = useMemo(() => {
-    // Current value based on market price or cost fallback
-    return stockStats.reduce((sum, s) => sum + s.marketValue, 0);
-  }, [stockStats]);
+  const totalPortfolioValue = useMemo(
+    () => stockStats.reduce((sum, stock) => sum + stock.marketValue, 0),
+    [stockStats]
+  );
 
-  const totalInvestedCapital = useMemo(() => {
-    return stockStats.reduce((sum, s) => sum + s.investedCapital, 0);
-  }, [stockStats]);
+  const totalInvestedCapital = useMemo(
+    () => stockStats.reduce((sum, stock) => sum + stock.investedCapital, 0),
+    [stockStats]
+  );
 
-  const totalDividends = useMemo(() => {
-    return portfolio.dividends.reduce((sum, d) => sum + d.amount, 0);
-  }, [portfolio.dividends]);
+  const totalDividends = useMemo(
+    () => visibleDividends.reduce((sum, dividend) => sum + dividend.amount, 0),
+    [visibleDividends]
+  );
 
-  const allocationData: ChartData[] = useMemo(() => {
-    return stockStats.map(s => ({
-      name: s.ticker,
-      value: s.totalCost
-    }));
-  }, [stockStats]);
+  const allocationData: ChartData[] = useMemo(() => (
+    stockStats.map(stock => ({
+      name: selectedAccount || !stock.account ? stock.ticker : `${stock.ticker} (${getAccountDisplayName(stock.account)})`,
+      value: stock.marketValue,
+    }))
+  ), [selectedAccount, stockStats]);
 
   const monthlyDividendData: DividendMonthData[] = useMemo(() => {
     const months: Record<string, number> = {};
-    portfolio.dividends.forEach(d => {
-      const month = d.date.substring(0, 7); 
-      months[month] = (months[month] || 0) + d.amount;
+    visibleDividends.forEach(dividend => {
+      const month = dividend.date.substring(0, 7);
+      months[month] = (months[month] || 0) + dividend.amount;
     });
+
     return Object.entries(months)
-      .sort((a, b) => a[0].localeCompare(b[0]))
+      .sort((left, right) => left[0].localeCompare(right[0]))
       .map(([month, amount]) => ({ month, amount }));
-  }, [portfolio.dividends]);
+  }, [visibleDividends]);
+
+  const recentDividends = useMemo(() => (
+    visibleDividends
+      .slice()
+      .sort((left, right) => right.date.localeCompare(left.date))
+      .slice(0, 8)
+  ), [visibleDividends]);
+
+  const accountSummaries = useMemo(() => (
+    portfolio.brokerAccounts.map(account => {
+      const stocks = portfolio.stocks.filter(stock => stock.accountId === account.id);
+      const dividends = portfolio.dividends.filter(dividend => dividend.accountId === account.id);
+      const marketValue = stocks.reduce((sum, stock) => {
+        const shares = stock.purchases.reduce((shareSum, purchase) => shareSum + purchase.shares, 0);
+        const cost = stock.purchases.reduce((costSum, purchase) => costSum + purchase.shares * purchase.price, 0);
+        return sum + (stock.currentPrice ? shares * stock.currentPrice : cost);
+      }, 0);
+      const investedCapital = stocks.reduce((sum, stock) => (
+        sum + stock.purchases
+          .filter(purchase => !purchase.type || purchase.type === 'buy')
+          .reduce((purchaseSum, purchase) => purchaseSum + purchase.shares * purchase.price, 0)
+      ), 0);
+      const totalDividendsForAccount = dividends.reduce((sum, dividend) => sum + dividend.amount, 0);
+
+      return {
+        account,
+        positions: stocks.length,
+        marketValue,
+        investedCapital,
+        totalDividends: totalDividendsForAccount,
+        yieldOnCost: investedCapital > 0 ? (totalDividendsForAccount / investedCapital) * 100 : 0,
+      };
+    })
+  ), [portfolio.brokerAccounts, portfolio.dividends, portfolio.stocks]);
+
+  const totalAccountMarketValue = useMemo(
+    () => accountSummaries.reduce((sum, summary) => sum + summary.marketValue, 0),
+    [accountSummaries]
+  );
+
+  const openPurchaseModal = () => {
+    const defaultAccountId = activeAccountId === ALL_ACCOUNTS_ID
+      ? portfolio.brokerAccounts[0]?.id || LEGACY_ACCOUNT_ID
+      : activeAccountId;
+    setNewPurchase(createBlankPurchaseForm(defaultAccountId));
+    setIsStockModalOpen(true);
+  };
+
+  const openDividendModal = () => {
+    const defaultStock = dividendStockOptions[0]?.id || '';
+    setNewDiv(createBlankDividendForm(defaultStock));
+    setIsDivModalOpen(true);
+  };
+
+  const handleAddPurchase = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPurchase.ticker || newPurchase.shares <= 0 || !newPurchase.accountId) return;
+
+    const tickerUpper = newPurchase.ticker.toUpperCase();
+    const existingStockIndex = portfolio.stocks.findIndex(
+      stock => stock.ticker === tickerUpper && stock.accountId === newPurchase.accountId
+    );
+
+    const purchase: Purchase = {
+      id: generateId(),
+      shares: Number(newPurchase.shares),
+      price: Number(newPurchase.price),
+      date: newPurchase.date,
+      type: 'buy',
+    };
+
+    const newStocks = [...portfolio.stocks];
+    if (existingStockIndex >= 0) {
+      newStocks[existingStockIndex] = {
+        ...newStocks[existingStockIndex],
+        purchases: [...newStocks[existingStockIndex].purchases, purchase],
+      };
+    } else {
+      newStocks.push({
+        id: generateId(),
+        ticker: tickerUpper,
+        accountId: newPurchase.accountId,
+        purchases: [purchase],
+      });
+    }
+
+    setPortfolio(prev => ({ ...prev, stocks: newStocks }));
+    setIsStockModalOpen(false);
+    setNewPurchase(createBlankPurchaseForm(newPurchase.accountId));
+  };
+
+  const handleAddDividend = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDiv.stockId || newDiv.amount <= 0) return;
+
+    const selectedStockRecord = portfolio.stocks.find(stock => stock.id === newDiv.stockId);
+    if (!selectedStockRecord) return;
+
+    let linkedPurchaseId: string | undefined;
+    const newStocks = [...portfolio.stocks];
+
+    if (newDiv.reinvested && newDiv.sharesBought > 0 && newDiv.sharePrice > 0) {
+      linkedPurchaseId = generateId();
+      const purchase: Purchase = {
+        id: linkedPurchaseId,
+        shares: Number(newDiv.sharesBought),
+        price: Number(newDiv.sharePrice),
+        date: newDiv.date,
+        type: 'drip',
+      };
+
+      const stockIndex = newStocks.findIndex(stock => stock.id === newDiv.stockId);
+      if (stockIndex >= 0) {
+        newStocks[stockIndex] = {
+          ...newStocks[stockIndex],
+          purchases: [...newStocks[stockIndex].purchases, purchase],
+        };
+      }
+    }
+
+    const dividend: Dividend = {
+      id: generateId(),
+      stockId: newDiv.stockId,
+      accountId: selectedStockRecord.accountId,
+      ticker: selectedStockRecord.ticker,
+      amount: Number(newDiv.amount),
+      date: newDiv.date,
+      reinvested: newDiv.reinvested,
+      linkedPurchaseId,
+    };
+
+    setPortfolio(prev => ({
+      ...prev,
+      stocks: newStocks,
+      dividends: [...prev.dividends, dividend],
+    }));
+    setIsDivModalOpen(false);
+    setNewDiv(createBlankDividendForm());
+  };
+
+  const handleAddAccount = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const institution = newAccount.institution === 'Custom'
+      ? newAccount.customInstitution.trim()
+      : newAccount.institution;
+
+    if (!institution || !newAccount.nickname.trim()) return;
+
+    const brokerAccount: BrokerAccount = {
+      id: generateId(),
+      institution,
+      type: newAccount.type,
+      color: newAccount.color,
+      nickname: newAccount.nickname.trim(),
+    };
+
+    setPortfolio(prev => ({
+      ...prev,
+      brokerAccounts: [...prev.brokerAccounts, brokerAccount],
+    }));
+    setActiveAccountId(brokerAccount.id);
+    setIsAccountModalOpen(false);
+    setNewAccount(createBlankAccountForm());
+  };
+
+  const updateBrokerAccount = (accountId: string, updates: Partial<BrokerAccount>) => {
+    setPortfolio(prev => ({
+      ...prev,
+      brokerAccounts: prev.brokerAccounts.map(account => (
+        account.id === accountId ? { ...account, ...updates } : account
+      )),
+    }));
+  };
+
+  const deleteStock = (stockId: string) => {
+    if (!window.confirm('Are you sure you want to delete this position and all its history?')) return;
+
+    setPortfolio(prev => ({
+      ...prev,
+      stocks: prev.stocks.filter(stock => stock.id !== stockId),
+      dividends: prev.dividends.filter(dividend => dividend.stockId !== stockId),
+    }));
+    setExpandedStockId(current => (current === stockId ? null : current));
+  };
+
+  const deletePurchase = (stockId: string, purchaseId: string) => {
+    setPortfolio(prev => {
+      const updatedStocks = prev.stocks
+        .map(stock => (
+          stock.id === stockId
+            ? { ...stock, purchases: stock.purchases.filter(purchase => purchase.id !== purchaseId) }
+            : stock
+        ))
+        .filter(stock => stock.purchases.length > 0);
+
+      const stockStillExists = updatedStocks.some(stock => stock.id === stockId);
+      const updatedDividends = stockStillExists
+        ? prev.dividends.filter(dividend => dividend.linkedPurchaseId !== purchaseId)
+        : prev.dividends.filter(dividend => dividend.stockId !== stockId && dividend.linkedPurchaseId !== purchaseId);
+
+      return {
+        ...prev,
+        stocks: updatedStocks,
+        dividends: updatedDividends,
+      };
+    });
+  };
+
+  const transferHolding = (stockId: string) => {
+    const targetAccountId = transferTargets[stockId];
+    if (!targetAccountId) return;
+
+    setPortfolio(prev => {
+      const moved = moveStockToAccount(prev.stocks, prev.dividends, stockId, targetAccountId);
+      return {
+        ...prev,
+        stocks: moved.stocks,
+        dividends: moved.dividends,
+      };
+    });
+    setTransferTargets(prev => {
+      const next = { ...prev };
+      delete next[stockId];
+      return next;
+    });
+  };
+
+  const confirmDeleteAccount = () => {
+    if (!pendingDeleteAccount) return;
+    if (portfolio.brokerAccounts.length <= 1) return;
+
+    const { accountId, mode, reassignToId } = pendingDeleteAccount;
+    if (mode === 'reassign' && !reassignToId) return;
+
+    setPortfolio(prev => {
+      const reassigned = mode === 'reassign'
+        ? reassignAccountHoldings(prev.stocks, prev.dividends, accountId, reassignToId)
+        : {
+            stocks: prev.stocks.filter(stock => stock.accountId !== accountId),
+            dividends: prev.dividends.filter(dividend => dividend.accountId !== accountId),
+          };
+
+      return {
+        ...prev,
+        brokerAccounts: prev.brokerAccounts.filter(account => account.id !== accountId),
+        stocks: reassigned.stocks,
+        dividends: reassigned.dividends,
+      };
+    });
+
+    if (activeAccountId === accountId) {
+      setActiveAccountId(ALL_ACCOUNTS_ID);
+    }
+    setPendingDeleteAccount(null);
+  };
 
   if (!passcode || passcode.trim() !== publicPasscode) {
     return (
@@ -269,15 +735,20 @@ const App: React.FC = () => {
             className="w-full px-4 py-3 rounded-xl border border-slate-200 mb-3 text-center text-lg"
             placeholder="Passcode"
             value={passcodeInput}
-            onChange={e => { setPasscodeInput(e.target.value); setPasscodeError(''); }}
-            onKeyDown={e => { if (e.key === 'Enter') {
-              if (passcodeInput.trim() === publicPasscode) {
-                setPasscode(passcodeInput.trim());
-                setPasscodeError('');
-              } else {
-                setPasscodeError('Incorrect passcode');
+            onChange={e => {
+              setPasscodeInput(e.target.value);
+              setPasscodeError('');
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                if (passcodeInput.trim() === publicPasscode) {
+                  setPasscode(passcodeInput.trim());
+                  setPasscodeError('');
+                } else {
+                  setPasscodeError('Incorrect passcode');
+                }
               }
-            }}}
+            }}
             autoFocus
           />
           <button
@@ -290,155 +761,71 @@ const App: React.FC = () => {
                 setPasscodeError('Incorrect passcode');
               }
             }}
-          >Access</button>
+          >
+            Access
+          </button>
           {passcodeError && <div className="text-red-500 text-xs mt-2">{passcodeError}</div>}
-          <div className="text-xs text-slate-400 mt-4 select-all">
-          </div>
         </div>
       </div>
     );
   }
 
-  const handleAddPurchase = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newPurchase.ticker || newPurchase.shares <= 0) return;
-
-    const tickerUpper = newPurchase.ticker.toUpperCase();
-    const existingStockIndex = portfolio.stocks.findIndex(s => s.ticker === tickerUpper);
-    
-    const purchase: Purchase = {
-      id: Math.random().toString(36).substr(2, 9),
-      shares: Number(newPurchase.shares),
-      price: Number(newPurchase.price),
-      date: newPurchase.date,
-      type: 'buy'
-    };
-
-    const newStocks = [...portfolio.stocks];
-    if (existingStockIndex >= 0) {
-      newStocks[existingStockIndex] = {
-        ...newStocks[existingStockIndex],
-        purchases: [...newStocks[existingStockIndex].purchases, purchase]
-      };
-    } else {
-      newStocks.push({
-        id: Math.random().toString(36).substr(2, 9),
-        ticker: tickerUpper,
-        purchases: [purchase]
-      });
-    }
-
-    setPortfolio(prev => ({ ...prev, stocks: newStocks }));
-    setIsStockModalOpen(false);
-    setNewPurchase({ ticker: '', shares: 0, price: 0, date: new Date().toISOString().split('T')[0] });
-  };
-
-  const handleAddDividend = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newDiv.stockId || newDiv.amount <= 0) return;
-
-    const selectedStock = portfolio.stocks.find(s => s.id === newDiv.stockId);
-    if (!selectedStock) return;
-
-    let linkedPurchaseId = undefined;
-    let newStocks = [...portfolio.stocks];
-
-    if (newDiv.reinvested && newDiv.sharesBought > 0 && newDiv.sharePrice > 0) {
-      linkedPurchaseId = Math.random().toString(36).substr(2, 9);
-      const purchase: Purchase = {
-        id: linkedPurchaseId,
-        shares: Number(newDiv.sharesBought),
-        price: Number(newDiv.sharePrice),
-        date: newDiv.date,
-        type: 'drip'
-      };
-
-      const stockIndex = newStocks.findIndex(s => s.id === newDiv.stockId);
-      if (stockIndex >= 0) {
-        newStocks[stockIndex] = {
-          ...newStocks[stockIndex],
-          purchases: [...newStocks[stockIndex].purchases, purchase]
-        };
-      }
-    }
-
-    const div: Dividend = {
-      id: Math.random().toString(36).substr(2, 9),
-      stockId: newDiv.stockId,
-      ticker: selectedStock.ticker,
-      amount: Number(newDiv.amount),
-      date: newDiv.date,
-      reinvested: newDiv.reinvested,
-      linkedPurchaseId
-    };
-
-    setPortfolio(prev => ({ 
-      stocks: newStocks,
-      dividends: [...prev.dividends, div] 
-    }));
-    setIsDivModalOpen(false);
-    setNewDiv({ 
-      stockId: '', 
-      amount: 0, 
-      date: new Date().toISOString().split('T')[0],
-      reinvested: false,
-      sharePrice: 0,
-      sharesBought: 0
-    });
-  };
-
-  const deleteStock = (id: string) => {
-    if (window.confirm("Are you sure you want to delete this position and all its history?")) {
-      setPortfolio(prev => ({
-        stocks: prev.stocks.filter(s => s.id !== id),
-        dividends: prev.dividends.filter(d => d.stockId !== id)
-      }));
-    }
-  };
-
-  const deletePurchase = (stockId: string, purchaseId: string) => {
-    const updatedStocks = portfolio.stocks.map(s => {
-      if (s.id === stockId) {
-        return { ...s, purchases: s.purchases.filter(p => p.id !== purchaseId) };
-      }
-      return s;
-    }).filter(s => s.purchases.length > 0);
-
-    setPortfolio(prev => ({ ...prev, stocks: updatedStocks }));
-  };
-
   return (
     <div className="min-h-screen bg-slate-50 pb-12">
       <nav className="bg-indigo-700 text-white p-4 shadow-xl sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <div className="flex items-center space-x-2">
-            <TrendingUp className="h-8 w-8 text-indigo-200" />
-            <h1 className="text-2xl font-bold tracking-tight text-white">DiviTrack <span className="text-indigo-200">Pro</span></h1>
-            
-            <div className={`ml-4 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center transition-colors ${
-              syncStatus === 'saved' ? 'bg-indigo-600 text-indigo-100' : 
-              syncStatus === 'saving' || syncStatus === 'loading' ? 'bg-indigo-500 text-white' : 
-              'bg-red-500 text-white'
+        <div className="max-w-7xl mx-auto flex flex-col gap-4 xl:flex-row xl:justify-between xl:items-center">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center space-x-2">
+              <TrendingUp className="h-8 w-8 text-indigo-200" />
+              <h1 className="text-2xl font-bold tracking-tight text-white">
+                DiviTrack <span className="text-indigo-200">Pro</span>
+              </h1>
+            </div>
+
+            <div className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center transition-colors ${
+              syncStatus === 'saved'
+                ? 'bg-indigo-600 text-indigo-100'
+                : syncStatus === 'saving' || syncStatus === 'loading'
+                  ? 'bg-indigo-500 text-white'
+                  : 'bg-red-500 text-white'
             }`}>
-              {syncStatus === 'loading' && <RefreshCw className="h-3 w-3 mr-1 animate-spin" />}
-              {syncStatus === 'saving' && <RefreshCw className="h-3 w-3 mr-1 animate-spin" />}
+              {(syncStatus === 'loading' || syncStatus === 'saving') && <RefreshCw className="h-3 w-3 mr-1 animate-spin" />}
               {syncStatus === 'saved' && <Cloud className="h-3 w-3 mr-1" />}
               {syncStatus === 'error' && <CloudOff className="h-3 w-3 mr-1" />}
               {syncStatus.toUpperCase()}
             </div>
+
+            <div className="text-xs text-indigo-100/90 font-semibold">
+              {selectedAccount ? `${getAccountDisplayName(selectedAccount)} view` : 'Consolidated across all broker accounts'}
+            </div>
           </div>
-          <div className="flex space-x-3">
-             <button 
+
+          <div className="flex flex-wrap gap-3">
+            <button
               disabled={syncStatus === 'loading'}
-              onClick={() => setIsStockModalOpen(true)}
+              onClick={() => setIsAccountModalOpen(true)}
+              className="bg-indigo-600 text-white border border-indigo-500 px-4 py-2 rounded-xl font-bold flex items-center hover:bg-indigo-500 transition-all active:scale-95 disabled:opacity-50"
+            >
+              <Building2 className="h-4 w-4 mr-2" /> Add Account
+            </button>
+            <button
+              disabled={syncStatus === 'loading'}
+              onClick={() => setIsManageAccountsOpen(true)}
+              className="bg-white/10 text-white px-4 py-2 rounded-xl font-bold flex items-center hover:bg-white/20 transition-all active:scale-95 disabled:opacity-50"
+            >
+              <Settings2 className="h-4 w-4 mr-2" /> Manage Accounts
+            </button>
+            <button
+              disabled={syncStatus === 'loading'}
+              onClick={openPurchaseModal}
               className="bg-white text-indigo-700 px-4 py-2 rounded-xl font-bold flex items-center shadow-md hover:bg-indigo-50 transition-all active:scale-95 disabled:opacity-50"
             >
               <Plus className="h-4 w-4 mr-2" /> Add Purchase
             </button>
-            <button 
-              disabled={syncStatus === 'loading' || portfolio.stocks.length === 0}
-              onClick={() => setIsDivModalOpen(true)}
-              className="bg-indigo-600 text-white border border-indigo-500 px-4 py-2 rounded-xl font-bold flex items-center hover:bg-indigo-500 transition-all active:scale-95 disabled:opacity-50"
+            <button
+              disabled={syncStatus === 'loading' || dividendStockOptions.length === 0}
+              onClick={openDividendModal}
+              className="bg-emerald-600 text-white border border-emerald-500 px-4 py-2 rounded-xl font-bold flex items-center hover:bg-emerald-500 transition-all active:scale-95 disabled:opacity-50"
             >
               <DollarSign className="h-4 w-4 mr-2" /> Log Div
             </button>
@@ -452,33 +839,171 @@ const App: React.FC = () => {
           <p className="text-slate-400 font-medium">Connecting to your portfolio...</p>
         </div>
       ) : (
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 animate-in fade-in duration-700">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 animate-in fade-in duration-700 space-y-8">
+          <section className="bg-white rounded-3xl shadow-sm border border-slate-200 p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Broker Account Switcher</p>
+                <h2 className="text-lg font-bold text-slate-900">Single-click account context</h2>
+              </div>
+              <p className="text-xs text-slate-400 font-semibold">Balances, positions, charts, and income update instantly.</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+              <button
+                onClick={() => setActiveAccountId(ALL_ACCOUNTS_ID)}
+                className={`text-left rounded-2xl border p-4 transition-all ${
+                  activeAccountId === ALL_ACCOUNTS_ID
+                    ? 'border-indigo-500 bg-indigo-50 shadow-sm'
+                    : 'border-slate-200 hover:border-indigo-200 hover:bg-slate-50'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="text-sm font-black text-slate-900">All Accounts</p>
+                    <p className="text-[11px] uppercase tracking-widest text-indigo-500 font-bold">Consolidated Portfolio</p>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full bg-slate-900 text-white text-[10px] font-black">
+                    {portfolio.stocks.length} positions
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-2xl font-black text-slate-900">{formatCurrency(totalAccountMarketValue)}</span>
+                  <span className="px-3 py-1 rounded-full bg-indigo-100 text-indigo-700 text-xs font-black">
+                    {portfolio.brokerAccounts.length} brokers
+                  </span>
+                </div>
+              </button>
+
+              {accountSummaries.map(summary => (
+                <button
+                  key={summary.account.id}
+                  onClick={() => setActiveAccountId(summary.account.id)}
+                  className={`text-left rounded-2xl border p-4 transition-all ${
+                    activeAccountId === summary.account.id
+                      ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
+                      : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="h-3 w-3 rounded-full" style={{ backgroundColor: summary.account.color }} />
+                        <p className={`text-sm font-black ${activeAccountId === summary.account.id ? 'text-white' : 'text-slate-900'}`}>
+                          {getAccountDisplayName(summary.account)}
+                        </p>
+                      </div>
+                      <p className={`text-[11px] uppercase tracking-widest font-bold ${activeAccountId === summary.account.id ? 'text-slate-300' : 'text-slate-400'}`}>
+                        {summary.account.institution} • {summary.account.type}
+                      </p>
+                    </div>
+                    <span
+                      className="px-2.5 py-1 rounded-full text-[10px] font-black"
+                      style={{ backgroundColor: activeAccountId === summary.account.id ? 'rgba(255,255,255,0.14)' : `${summary.account.color}1A`, color: activeAccountId === summary.account.id ? '#ffffff' : summary.account.color }}
+                    >
+                      {summary.positions} positions
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <span className={`text-2xl font-black ${activeAccountId === summary.account.id ? 'text-white' : 'text-slate-900'}`}>
+                      {formatCurrency(summary.marketValue)}
+                    </span>
+                    <span className={`px-3 py-1 rounded-full text-xs font-black ${activeAccountId === summary.account.id ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                      YoC {summary.yieldOnCost.toFixed(2)}%
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Portfolio Value</p>
-              <p className="text-2xl font-black text-slate-900">${totalPortfolioValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+              <p className="text-2xl font-black text-slate-900">{formatCurrency(totalPortfolioValue)}</p>
             </div>
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Total Dividends</p>
-              <p className="text-2xl font-black text-emerald-600">${totalDividends.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+              <p className="text-2xl font-black text-emerald-600">{formatCurrency(totalDividends)}</p>
             </div>
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Yield on Invested</p>
               <p className="text-2xl font-black text-indigo-600">
                 {totalInvestedCapital > 0 ? ((totalDividends / totalInvestedCapital) * 100).toFixed(2) : '0.00'}%
               </p>
-              <p className="text-[10px] text-slate-400 font-bold mt-1">on ${totalInvestedCapital.toLocaleString(undefined, { maximumFractionDigits: 0 })} cash invested</p>
+              <p className="text-[10px] text-slate-400 font-bold mt-1">
+                on {formatCurrency(totalInvestedCapital, 0)} cash invested
+              </p>
             </div>
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Positions</p>
-              <p className="text-2xl font-black text-slate-900">{portfolio.stocks.length}</p>
+              <p className="text-2xl font-black text-slate-900">{stockStats.length}</p>
             </div>
-          </div>
+          </section>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+          {activeAccountId === ALL_ACCOUNTS_ID && portfolio.brokerAccounts.length > 0 && (
+            <section className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Broker Account Breakdown</p>
+                  <h2 className="text-lg font-bold text-slate-900">Capital allocation and yield by brokerage</h2>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                {accountSummaries.map(summary => {
+                  const allocationPercent = totalAccountMarketValue > 0 ? (summary.marketValue / totalAccountMarketValue) * 100 : 0;
+                  return (
+                    <div key={summary.account.id} className="rounded-2xl border border-slate-200 p-4">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                          <span className="h-4 w-4 rounded-full" style={{ backgroundColor: summary.account.color }} />
+                          <div>
+                            <p className="font-black text-slate-900">{getAccountDisplayName(summary.account)}</p>
+                            <p className="text-[11px] uppercase tracking-widest text-slate-400 font-bold">
+                              {summary.account.institution} • {summary.account.type}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Balance</p>
+                            <p className="font-black text-slate-900">{formatCurrency(summary.marketValue)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Invested</p>
+                            <p className="font-black text-slate-900">{formatCurrency(summary.investedCapital)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Dividends</p>
+                            <p className="font-black text-emerald-600">{formatCurrency(summary.totalDividends)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Yield</p>
+                            <p className="font-black text-indigo-600">{summary.yieldOnCost.toFixed(2)}%</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-4">
+                        <div className="flex-1 h-3 rounded-full bg-slate-100 overflow-hidden">
+                          <div className="h-full rounded-full" style={{ width: `${allocationPercent}%`, backgroundColor: summary.account.color }} />
+                        </div>
+                        <span className="text-sm font-black text-slate-600 min-w-20 text-right">{allocationPercent.toFixed(1)}%</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          <section className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
               <h2 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
-                <PieChartIcon className="h-5 w-5 mr-2 text-indigo-500" /> Capital Allocation
+                <PieChartIcon className="h-5 w-5 mr-2 text-indigo-500" />
+                Capital Allocation {selectedAccount ? `• ${getAccountDisplayName(selectedAccount)}` : '• All Accounts'}
               </h2>
               <div className="h-64">
                 {allocationData.length > 0 ? (
@@ -494,7 +1019,7 @@ const App: React.FC = () => {
                         dataKey="value"
                       >
                         {allocationData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          <Cell key={`${entry.name}-${index}`} fill={COLORS[index % COLORS.length]} />
                         ))}
                       </Pie>
                       <Tooltip formatter={(value: number) => `$${value.toLocaleString()}`} />
@@ -511,7 +1036,8 @@ const App: React.FC = () => {
 
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
               <h2 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
-                <History className="h-5 w-5 mr-2 text-indigo-500" /> Income History
+                <History className="h-5 w-5 mr-2 text-indigo-500" />
+                Monthly Dividend History {selectedAccount ? `• ${getAccountDisplayName(selectedAccount)}` : '• All Accounts'}
               </h2>
               <div className="h-64">
                 {monthlyDividendData.length > 0 ? (
@@ -519,7 +1045,7 @@ const App: React.FC = () => {
                     <BarChart data={monthlyDividendData}>
                       <XAxis dataKey="month" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
                       <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
-                      <Tooltip cursor={{fill: '#f8fafc'}} />
+                      <Tooltip cursor={{ fill: '#f8fafc' }} formatter={(value: number) => `$${value.toFixed(2)}`} />
                       <Bar dataKey="amount" fill="#6366f1" radius={[6, 6, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
@@ -530,12 +1056,19 @@ const App: React.FC = () => {
                 )}
               </div>
             </div>
-          </div>
+          </section>
 
-          <div className="space-y-8">
+          <section className="space-y-8">
             <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-                <h2 className="text-lg font-bold text-slate-800">Your Portfolio</h2>
+              <div className="p-6 border-b border-slate-100 flex flex-col gap-3 lg:flex-row lg:justify-between lg:items-center">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800">Your Portfolio</h2>
+                  <p className="text-sm text-slate-400">
+                    {selectedAccount
+                      ? `Showing holdings for ${getAccountDisplayName(selectedAccount)}.`
+                      : 'Showing holdings across all broker accounts.'}
+                  </p>
+                </div>
                 <div className="flex items-center text-slate-400 text-xs">
                   <Calendar className="h-3 w-3 mr-1" /> Last updated: {new Date().toLocaleDateString()}
                 </div>
@@ -558,17 +1091,29 @@ const App: React.FC = () => {
                   <tbody className="divide-y divide-slate-100">
                     {stockStats.length > 0 ? stockStats.map(stock => (
                       <React.Fragment key={stock.id}>
-                        <tr 
+                        <tr
                           className={`hover:bg-slate-50 transition-colors cursor-pointer ${expandedStockId === stock.id ? 'bg-indigo-50/30' : ''}`}
                           onClick={() => setExpandedStockId(expandedStockId === stock.id ? null : stock.id)}
                         >
                           <td className="px-6 py-4">
-                            {expandedStockId === stock.id ? <ChevronDown className="h-4 w-4 text-indigo-500" /> : <ChevronRight className="h-4 w-4 text-slate-300" />}
+                            {expandedStockId === stock.id
+                              ? <ChevronDown className="h-4 w-4 text-indigo-500" />
+                              : <ChevronRight className="h-4 w-4 text-slate-300" />}
                           </td>
                           <td className="px-6 py-4">
-                            <div className="flex flex-col">
+                            <div className="flex flex-col gap-2">
                               <span className="font-black text-slate-900">{stock.ticker}</span>
-                              <span className="text-[10px] text-indigo-500 font-bold uppercase">{stock.purchases.length} buys</span>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-[10px] text-indigo-500 font-bold uppercase">{stock.purchases.length} transactions</span>
+                                {!selectedAccount && stock.account && (
+                                  <span
+                                    className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black"
+                                    style={{ backgroundColor: `${stock.account.color}1A`, color: stock.account.color }}
+                                  >
+                                    {getAccountDisplayName(stock.account)}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </td>
                           <td className="px-6 py-4 text-right font-medium text-slate-600">{stock.totalShares.toFixed(4)}</td>
@@ -578,8 +1123,10 @@ const App: React.FC = () => {
                           </td>
                           <td className="px-6 py-4 text-right font-bold text-slate-900">
                             <div className="flex flex-col items-end">
-                              <span>${stock.investedCapital.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                              <span className="text-[10px] text-slate-400 font-normal">Mkt Value: ${stock.marketValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                              <span>{formatCurrency(stock.investedCapital)}</span>
+                              <span className="text-[10px] text-slate-400 font-normal">
+                                Mkt Value: {formatCurrency(stock.marketValue, 0)}
+                              </span>
                             </div>
                           </td>
                           <td className="px-6 py-4 text-right">
@@ -594,8 +1141,11 @@ const App: React.FC = () => {
                             </span>
                           </td>
                           <td className="px-6 py-4 text-center">
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); deleteStock(stock.id); }}
+                            <button
+                              onClick={e => {
+                                e.stopPropagation();
+                                deleteStock(stock.id);
+                              }}
                               className="p-2 text-slate-300 hover:text-red-500 transition-colors rounded-lg hover:bg-red-50"
                             >
                               <Trash2 className="h-4 w-4" />
@@ -605,53 +1155,90 @@ const App: React.FC = () => {
                         {expandedStockId === stock.id && (
                           <tr>
                             <td colSpan={9} className="px-6 py-4 bg-slate-50/50">
-                              <div className="pl-10 space-y-3">
-                                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Purchase History</h4>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                                  {stock.purchases.sort((a,b) => b.date.localeCompare(a.date)).map(p => (
-                                    <div key={p.id} className={`group flex justify-between items-center p-3 border rounded-xl hover:border-indigo-200 hover:bg-indigo-50/20 transition-all ${p.type === 'drip' ? 'border-emerald-100 bg-emerald-50/30' : 'border-slate-100'}`}>
-                                      <div className="flex flex-col">
-                                        <div className="flex items-center space-x-2">
-                                          <span className="text-[10px] font-bold text-slate-400">{p.date}</span>
-                                          {p.type === 'drip' && <span className="text-[8px] font-black uppercase bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded-full">DRIP</span>}
-                                        </div>
-                                        <span className="text-sm font-bold text-slate-800">{p.shares.toFixed(4)} sh @ ${p.price.toFixed(2)}</span>
+                              <div className="pl-10 space-y-5">
+                                {portfolio.brokerAccounts.length > 1 && (
+                                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                                    <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                                      <div>
+                                        <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Holding Transfer</h4>
+                                        <p className="text-sm text-slate-500">Move this holding and all purchase history to another broker account.</p>
                                       </div>
-                                      <button 
-                                        onClick={() => deletePurchase(stock.id, p.id)}
-                                        className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-300 hover:text-red-500 transition-all"
-                                      >
-                                        <Trash2 className="h-3 w-3" />
-                                      </button>
+                                      <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+                                        <select
+                                          value={transferTargets[stock.id] || ''}
+                                          onChange={e => setTransferTargets(prev => ({ ...prev, [stock.id]: e.target.value }))}
+                                          className="px-4 py-3 rounded-xl border border-slate-200 bg-white focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900 text-sm min-w-56"
+                                        >
+                                          <option value="">Select destination account...</option>
+                                          {portfolio.brokerAccounts
+                                            .filter(account => account.id !== stock.accountId)
+                                            .map(account => (
+                                              <option key={account.id} value={account.id}>{getAccountDisplayName(account)}</option>
+                                            ))}
+                                        </select>
+                                        <button
+                                          onClick={() => transferHolding(stock.id)}
+                                          disabled={!transferTargets[stock.id]}
+                                          className="bg-slate-900 text-white px-4 py-3 rounded-xl font-bold flex items-center justify-center hover:bg-slate-800 transition-all disabled:opacity-50"
+                                        >
+                                          <ArrowRightLeft className="h-4 w-4 mr-2" /> Transfer Holding
+                                        </button>
+                                      </div>
                                     </div>
-                                  ))}
+                                  </div>
+                                )}
+
+                                <div>
+                                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Purchase History</h4>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm mt-3">
+                                    {stock.purchases.slice().sort((left, right) => right.date.localeCompare(left.date)).map(purchase => (
+                                      <div key={purchase.id} className={`group flex justify-between items-center p-3 border rounded-xl hover:border-indigo-200 hover:bg-indigo-50/20 transition-all ${purchase.type === 'drip' ? 'border-emerald-100 bg-emerald-50/30' : 'border-slate-100'}`}>
+                                        <div className="flex flex-col">
+                                          <div className="flex items-center space-x-2">
+                                            <span className="text-[10px] font-bold text-slate-400">{purchase.date}</span>
+                                            {purchase.type === 'drip' && <span className="text-[8px] font-black uppercase bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded-full">DRIP</span>}
+                                          </div>
+                                          <span className="text-sm font-bold text-slate-800">{purchase.shares.toFixed(4)} sh @ ${purchase.price.toFixed(2)}</span>
+                                        </div>
+                                        <button
+                                          onClick={() => deletePurchase(stock.id, purchase.id)}
+                                          className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-300 hover:text-red-500 transition-all"
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
                                 </div>
-                                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mt-8">Yield on Cost Progression</h4>
-                                <div className="overflow-x-auto mt-2">
-                                  <table className="min-w-[400px] text-xs border border-slate-200 rounded-xl">
-                                    <thead className="bg-slate-100">
-                                      <tr>
-                                        <th className="px-2 py-1">Year</th>
-                                        <th className="px-2 py-1">Invested</th>
-                                        <th className="px-2 py-1">Divs (yr)</th>
-                                        <th className="px-2 py-1">Cum Divs</th>
-                                        <th className="px-2 py-1">YoC (yr)</th>
-                                        <th className="px-2 py-1">YoC (cum)</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {stock.annualYoC.map(row => (
-                                        <tr key={row.year}>
-                                          <td className="px-2 py-1 text-center font-bold">{row.year}</td>
-                                          <td className="px-2 py-1 text-right">${row.invested.toLocaleString(undefined, {maximumFractionDigits:0})}</td>
-                                          <td className="px-2 py-1 text-right">${row.divs.toLocaleString(undefined, {maximumFractionDigits:2})}</td>
-                                          <td className="px-2 py-1 text-right">${row.cumDivs.toLocaleString(undefined, {maximumFractionDigits:2})}</td>
-                                          <td className="px-2 py-1 text-right">{row.yocYear.toFixed(2)}%</td>
-                                          <td className="px-2 py-1 text-right">{row.yoc.toFixed(2)}%</td>
+
+                                <div>
+                                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mt-8">Yield on Cost Progression</h4>
+                                  <div className="overflow-x-auto mt-2">
+                                    <table className="min-w-[400px] text-xs border border-slate-200 rounded-xl">
+                                      <thead className="bg-slate-100">
+                                        <tr>
+                                          <th className="px-2 py-1">Year</th>
+                                          <th className="px-2 py-1">Invested</th>
+                                          <th className="px-2 py-1">Divs (yr)</th>
+                                          <th className="px-2 py-1">Cum Divs</th>
+                                          <th className="px-2 py-1">YoC (yr)</th>
+                                          <th className="px-2 py-1">YoC (cum)</th>
                                         </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
+                                      </thead>
+                                      <tbody>
+                                        {stock.annualYoC.map(row => (
+                                          <tr key={row.year}>
+                                            <td className="px-2 py-1 text-center font-bold">{row.year}</td>
+                                            <td className="px-2 py-1 text-right">${row.invested.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                                            <td className="px-2 py-1 text-right">${row.divs.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                                            <td className="px-2 py-1 text-right">${row.cumDivs.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                                            <td className="px-2 py-1 text-right">{row.yocYear.toFixed(2)}%</td>
+                                            <td className="px-2 py-1 text-right">{row.yoc.toFixed(2)}%</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
                                 </div>
                               </div>
                             </td>
@@ -662,8 +1249,8 @@ const App: React.FC = () => {
                       <tr>
                         <td colSpan={9} className="px-6 py-20 text-center text-slate-300 italic">
                           <Wallet className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                          <p className="text-lg">Your portfolio is currently empty.</p>
-                          <p className="text-sm">Click \"Add Purchase\" to track your first asset.</p>
+                          <p className="text-lg">No holdings in this view yet.</p>
+                          <p className="text-sm">Click Add Purchase to track your next position.</p>
                         </td>
                       </tr>
                     )}
@@ -671,31 +1258,45 @@ const App: React.FC = () => {
                 </table>
               </div>
             </div>
+
             <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6">
               <h2 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
                 <History className="h-5 w-5 mr-2 text-indigo-500" /> Recent Income
               </h2>
               <div className="space-y-3">
-                {portfolio.dividends.slice(-8).reverse().map(div => (
-                  <div key={div.id} className="flex justify-between items-center p-4 rounded-2xl border border-slate-50 bg-slate-50/50 hover:bg-slate-50 transition-colors">
-                    <div className="flex items-center">
-                      <div className="h-10 w-10 rounded-full bg-emerald-100 flex items-center justify-center mr-4 text-emerald-600">
-                        <DollarSign className="h-5 w-5" />
+                {recentDividends.map(dividend => {
+                  const account = accountMap.get(dividend.accountId);
+                  return (
+                    <div key={dividend.id} className="flex justify-between items-center p-4 rounded-2xl border border-slate-50 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                      <div className="flex items-center gap-4">
+                        <div className="h-10 w-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
+                          <DollarSign className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-black text-slate-900">{dividend.ticker}</p>
+                            {account && (
+                              <span
+                                className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black"
+                                style={{ backgroundColor: `${account.color}1A`, color: account.color }}
+                              >
+                                {getAccountDisplayName(account)}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase">{dividend.date}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-black text-slate-900">{div.ticker}</p>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase">{div.date}</p>
-                      </div>
+                      <p className="font-black text-emerald-600 text-lg">+${dividend.amount.toFixed(2)}</p>
                     </div>
-                    <p className="font-black text-emerald-600 text-lg">+${div.amount.toFixed(2)}</p>
-                  </div>
-                ))}
-                {portfolio.dividends.length === 0 && (
+                  );
+                })}
+                {recentDividends.length === 0 && (
                   <p className="text-sm text-slate-300 italic text-center py-6">No income recorded</p>
                 )}
               </div>
             </div>
-          </div>
+          </section>
         </main>
       )}
 
@@ -710,50 +1311,63 @@ const App: React.FC = () => {
             </div>
             <form onSubmit={handleAddPurchase} className="space-y-6">
               <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Broker Account</label>
+                <select
+                  required
+                  value={newPurchase.accountId}
+                  onChange={e => setNewPurchase({ ...newPurchase, accountId: e.target.value })}
+                  className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900"
+                >
+                  {portfolio.brokerAccounts.map(account => (
+                    <option key={account.id} value={account.id}>{getAccountDisplayName(account)}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Ticker Symbol</label>
-                <input 
-                  type="text" 
-                  placeholder="e.g. MSFT" 
+                <input
+                  type="text"
+                  placeholder="e.g. MSFT"
                   required
                   autoFocus
                   value={newPurchase.ticker}
-                  onChange={e => setNewPurchase({...newPurchase, ticker: e.target.value})}
+                  onChange={e => setNewPurchase({ ...newPurchase, ticker: e.target.value })}
                   className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900"
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Shares</label>
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
                     step="0.0001"
                     placeholder="0.00"
                     required
                     value={newPurchase.shares || ''}
-                    onChange={e => setNewPurchase({...newPurchase, shares: Number(e.target.value)})}
+                    onChange={e => setNewPurchase({ ...newPurchase, shares: Number(e.target.value) })}
                     className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Price per Share</label>
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
                     step="0.01"
                     placeholder="0.00"
                     required
                     value={newPurchase.price || ''}
-                    onChange={e => setNewPurchase({...newPurchase, price: Number(e.target.value)})}
+                    onChange={e => setNewPurchase({ ...newPurchase, price: Number(e.target.value) })}
                     className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900"
                   />
                 </div>
               </div>
               <div>
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Purchase Date</label>
-                <input 
+                <input
                   type="date"
                   required
                   value={newPurchase.date}
-                  onChange={e => setNewPurchase({...newPurchase, date: e.target.value})}
+                  onChange={e => setNewPurchase({ ...newPurchase, date: e.target.value })}
                   className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900"
                 />
               </div>
@@ -777,37 +1391,42 @@ const App: React.FC = () => {
             <form onSubmit={handleAddDividend} className="space-y-6">
               <div>
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Holding</label>
-                <select 
+                <select
                   required
                   value={newDiv.stockId}
-                  onChange={e => setNewDiv({...newDiv, stockId: e.target.value})}
+                  onChange={e => setNewDiv({ ...newDiv, stockId: e.target.value })}
                   className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900"
                 >
                   <option value="">Select an asset...</option>
-                  {portfolio.stocks.map(s => (
-                    <option key={s.id} value={s.id}>{s.ticker}</option>
-                  ))}
+                  {dividendStockOptions.map(stock => {
+                    const account = accountMap.get(stock.accountId);
+                    return (
+                      <option key={stock.id} value={stock.id}>
+                        {selectedAccount ? stock.ticker : `${stock.ticker} • ${account ? getAccountDisplayName(account) : 'Unknown Account'}`}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
               <div>
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Dividend Amount ($)</label>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   step="0.01"
                   placeholder="0.00"
                   required
                   value={newDiv.amount || ''}
-                  onChange={e => setNewDiv({...newDiv, amount: Number(e.target.value)})}
+                  onChange={e => setNewDiv({ ...newDiv, amount: Number(e.target.value) })}
                   className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900"
                 />
               </div>
               <div>
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Payment Date</label>
-                <input 
+                <input
                   type="date"
                   required
                   value={newDiv.date}
-                  onChange={e => setNewDiv({...newDiv, date: e.target.value})}
+                  onChange={e => setNewDiv({ ...newDiv, date: e.target.value })}
                   className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900"
                 />
               </div>
@@ -818,18 +1437,18 @@ const App: React.FC = () => {
                     type="checkbox"
                     id="reinvested"
                     checked={newDiv.reinvested}
-                    onChange={e => setNewDiv({...newDiv, reinvested: e.target.checked})}
+                    onChange={e => setNewDiv({ ...newDiv, reinvested: e.target.checked })}
                     className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                   />
                   <label htmlFor="reinvested" className="ml-2 text-sm font-bold text-slate-700">Reinvested (DRIP)</label>
                 </div>
-                
+
                 {newDiv.reinvested && (
                   <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2 duration-200">
                     <div>
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Share Price</label>
-                      <input 
-                        type="number" 
+                      <input
+                        type="number"
                         step="0.01"
                         placeholder="0.00"
                         required={newDiv.reinvested}
@@ -837,9 +1456,9 @@ const App: React.FC = () => {
                         onChange={e => {
                           const price = Number(e.target.value);
                           setNewDiv(prev => ({
-                            ...prev, 
+                            ...prev,
                             sharePrice: price,
-                            sharesBought: price > 0 ? Number((prev.amount / price).toFixed(6)) : 0
+                            sharesBought: price > 0 ? Number((prev.amount / price).toFixed(6)) : 0,
                           }));
                         }}
                         className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900 text-sm"
@@ -847,13 +1466,13 @@ const App: React.FC = () => {
                     </div>
                     <div>
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Shares Bought</label>
-                      <input 
-                        type="number" 
+                      <input
+                        type="number"
                         step="0.0001"
                         placeholder="0.0000"
                         required={newDiv.reinvested}
                         value={newDiv.sharesBought || ''}
-                        onChange={e => setNewDiv({...newDiv, sharesBought: Number(e.target.value)})}
+                        onChange={e => setNewDiv({ ...newDiv, sharesBought: Number(e.target.value) })}
                         className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900 text-sm"
                       />
                     </div>
@@ -865,6 +1484,275 @@ const App: React.FC = () => {
                 Record Payment
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {isAccountModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-lg animate-in zoom-in-95 duration-200 p-8">
+            <div className="flex justify-between items-center mb-8">
+              <h3 className="text-2xl font-black text-slate-900">Add Broker Account</h3>
+              <button onClick={() => setIsAccountModalOpen(false)} className="bg-slate-100 p-2 rounded-full text-slate-400 hover:text-slate-600 transition-colors">
+                <Plus className="h-6 w-6 rotate-45" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddAccount} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Brokerage Institution</label>
+                  <select
+                    value={newAccount.institution}
+                    onChange={e => setNewAccount({ ...newAccount, institution: e.target.value })}
+                    className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900"
+                  >
+                    {BROKER_INSTITUTIONS.map(institution => (
+                      <option key={institution} value={institution}>{institution}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Account Type</label>
+                  <select
+                    value={newAccount.type}
+                    onChange={e => setNewAccount({ ...newAccount, type: e.target.value })}
+                    className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900"
+                  >
+                    {ACCOUNT_TYPES.map(accountType => (
+                      <option key={accountType} value={accountType}>{accountType}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {newAccount.institution === 'Custom' && (
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Custom Institution Name</label>
+                  <input
+                    type="text"
+                    placeholder="Your brokerage name"
+                    required={newAccount.institution === 'Custom'}
+                    value={newAccount.customInstitution}
+                    onChange={e => setNewAccount({ ...newAccount, customInstitution: e.target.value })}
+                    className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900"
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Account Nickname</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Dividend IRA"
+                  required
+                  value={newAccount.nickname}
+                  onChange={e => setNewAccount({ ...newAccount, nickname: e.target.value })}
+                  className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Theme Color</label>
+                <div className="flex flex-wrap gap-3">
+                  {ACCOUNT_COLOR_OPTIONS.map(color => (
+                    <button
+                      key={color}
+                      type="button"
+                      onClick={() => setNewAccount({ ...newAccount, color })}
+                      className={`h-10 w-10 rounded-full border-4 transition-all ${newAccount.color === color ? 'border-slate-900 scale-110' : 'border-white'}`}
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <button type="submit" className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-slate-800 transition-all shadow-xl active:scale-95 mt-4">
+                Create Broker Account
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {isManageAccountsOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto animate-in zoom-in-95 duration-200 p-8">
+            <div className="flex justify-between items-center mb-8">
+              <div>
+                <h3 className="text-2xl font-black text-slate-900">Manage Broker Accounts</h3>
+                <p className="text-sm text-slate-400 mt-1">Edit account details, review balances and yields, or safely reassign/delete accounts.</p>
+              </div>
+              <button onClick={() => { setIsManageAccountsOpen(false); setPendingDeleteAccount(null); }} className="bg-slate-100 p-2 rounded-full text-slate-400 hover:text-slate-600 transition-colors">
+                <Plus className="h-6 w-6 rotate-45" />
+              </button>
+            </div>
+
+            <div className="space-y-5">
+              {accountSummaries.map(summary => {
+                const reassignmentTargets = portfolio.brokerAccounts.filter(account => account.id !== summary.account.id);
+                return (
+                  <div key={summary.account.id} className="border border-slate-200 rounded-3xl p-6">
+                    <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-6">
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-3">
+                          <span className="h-4 w-4 rounded-full" style={{ backgroundColor: summary.account.color }} />
+                          <h4 className="text-lg font-black text-slate-900">{getAccountDisplayName(summary.account)}</h4>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Nickname</label>
+                            <input
+                              type="text"
+                              value={summary.account.nickname}
+                              onChange={e => updateBrokerAccount(summary.account.id, { nickname: e.target.value })}
+                              className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Institution</label>
+                            <input
+                              type="text"
+                              value={summary.account.institution}
+                              onChange={e => updateBrokerAccount(summary.account.id, { institution: e.target.value })}
+                              className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Account Type</label>
+                            <select
+                              value={summary.account.type}
+                              onChange={e => updateBrokerAccount(summary.account.id, { type: e.target.value })}
+                              className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900"
+                            >
+                              {ACCOUNT_TYPES.map(accountType => (
+                                <option key={accountType} value={accountType}>{accountType}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Theme Color</label>
+                            <div className="flex flex-wrap gap-2 pt-2">
+                              {ACCOUNT_COLOR_OPTIONS.map(color => (
+                                <button
+                                  key={color}
+                                  type="button"
+                                  onClick={() => updateBrokerAccount(summary.account.id, { color })}
+                                  className={`h-8 w-8 rounded-full border-4 ${summary.account.color === color ? 'border-slate-900' : 'border-white'}`}
+                                  style={{ backgroundColor: color }}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-50 rounded-3xl p-5 space-y-3 border border-slate-100">
+                        <div>
+                          <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Account Snapshot</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Balance</p>
+                            <p className="font-black text-slate-900">{formatCurrency(summary.marketValue)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Positions</p>
+                            <p className="font-black text-slate-900">{summary.positions}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Dividends</p>
+                            <p className="font-black text-emerald-600">{formatCurrency(summary.totalDividends)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Yield on Cost</p>
+                            <p className="font-black text-indigo-600">{summary.yieldOnCost.toFixed(2)}%</p>
+                          </div>
+                        </div>
+
+                        {portfolio.brokerAccounts.length > 1 && (
+                          <div className="pt-3 border-t border-slate-200">
+                            <button
+                              type="button"
+                              onClick={() => setPendingDeleteAccount({
+                                accountId: summary.account.id,
+                                mode: 'reassign',
+                                reassignToId: reassignmentTargets[0]?.id || '',
+                              })}
+                              className="w-full bg-red-50 text-red-600 px-4 py-3 rounded-2xl font-black text-sm hover:bg-red-100 transition-colors"
+                            >
+                              Delete or Reassign Account
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {pendingDeleteAccount?.accountId === summary.account.id && (
+                      <div className="mt-6 rounded-3xl border border-red-200 bg-red-50 p-5 space-y-4">
+                        <div>
+                          <p className="text-sm font-black text-red-700">Choose how to remove this account</p>
+                          <p className="text-sm text-red-600/80">You can move all holdings and dividend history to another broker or delete all associated records.</p>
+                        </div>
+
+                        <div className="space-y-3">
+                          <label className="flex items-start gap-3 text-sm font-semibold text-slate-700">
+                            <input
+                              type="radio"
+                              checked={pendingDeleteAccount.mode === 'reassign'}
+                              onChange={() => setPendingDeleteAccount(prev => prev ? {
+                                ...prev,
+                                mode: 'reassign',
+                                reassignToId: prev.reassignToId || reassignmentTargets[0]?.id || '',
+                              } : prev)}
+                            />
+                            <span>Reassign holdings and dividend records to another broker account.</span>
+                          </label>
+                          {pendingDeleteAccount.mode === 'reassign' && (
+                            <select
+                              value={pendingDeleteAccount.reassignToId}
+                              onChange={e => setPendingDeleteAccount(prev => prev ? { ...prev, reassignToId: e.target.value } : prev)}
+                              className="w-full px-4 py-3 rounded-2xl border border-red-200 bg-white focus:ring-4 focus:ring-red-500/10 focus:border-red-400 outline-none font-bold text-slate-900"
+                            >
+                              {reassignmentTargets.map(account => (
+                                <option key={account.id} value={account.id}>{getAccountDisplayName(account)}</option>
+                              ))}
+                            </select>
+                          )}
+                          <label className="flex items-start gap-3 text-sm font-semibold text-slate-700">
+                            <input
+                              type="radio"
+                              checked={pendingDeleteAccount.mode === 'delete'}
+                              onChange={() => setPendingDeleteAccount(prev => prev ? { ...prev, mode: 'delete' } : prev)}
+                            />
+                            <span>Delete the account and remove all holdings, purchases, and dividend history tied to it.</span>
+                          </label>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row gap-3 sm:justify-end">
+                          <button
+                            type="button"
+                            onClick={() => setPendingDeleteAccount(null)}
+                            className="px-4 py-3 rounded-2xl font-bold text-slate-600 bg-white border border-slate-200 hover:bg-slate-50"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={confirmDeleteAccount}
+                            className="px-4 py-3 rounded-2xl font-bold text-white bg-red-600 hover:bg-red-700"
+                          >
+                            Confirm Removal
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}

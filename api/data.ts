@@ -4,6 +4,50 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 const uri = process.env.MONGODB_STRING;
 let cachedClient: MongoClient | null = null;
 
+const LEGACY_ACCOUNT_ID = 'default-account';
+
+const createDefaultAccount = () => ({
+  id: LEGACY_ACCOUNT_ID,
+  institution: 'Custom',
+  type: 'Taxable',
+  color: '#6366f1',
+  nickname: 'Primary Account'
+});
+
+function normalizePortfolioData(payload: any) {
+  const brokerAccounts = Array.isArray(payload?.brokerAccounts) && payload.brokerAccounts.length > 0
+    ? payload.brokerAccounts
+    : [createDefaultAccount()];
+
+  const validAccountIds = new Set(brokerAccounts.map((account: any) => account.id));
+  const fallbackAccountId = brokerAccounts[0]?.id || LEGACY_ACCOUNT_ID;
+
+  const stocks = Array.isArray(payload?.stocks)
+    ? payload.stocks.map((stock: any) => ({
+        ...stock,
+        accountId: validAccountIds.has(stock.accountId) ? stock.accountId : fallbackAccountId,
+        purchases: Array.isArray(stock.purchases) ? stock.purchases : []
+      }))
+    : [];
+
+  const stockAccountMap = new Map(stocks.map((stock: any) => [stock.id, stock.accountId]));
+
+  const dividends = Array.isArray(payload?.dividends)
+    ? payload.dividends.map((dividend: any) => ({
+        ...dividend,
+        accountId: validAccountIds.has(dividend.accountId)
+          ? dividend.accountId
+          : stockAccountMap.get(dividend.stockId) || fallbackAccountId
+      }))
+    : [];
+
+  return {
+    brokerAccounts,
+    stocks,
+    dividends
+  };
+}
+
 async function getMongoClient() {
   if (cachedClient) return cachedClient;
   if (!uri) throw new Error('MONGODB_STRING environment variable is not set');
@@ -32,7 +76,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // If no DB configured, serve empty data for GET to avoid frontend breaking
     if (req.method === 'GET' && !uri) {
-      return res.status(200).json({ stocks: [], dividends: [] });
+      return res.status(200).json(normalizePortfolioData(null));
     }
 
     const client = await getMongoClient();
@@ -44,9 +88,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method === 'GET') {
       try {
         const data = await collection.findOne({ _id: 'master_portfolio' });
-        return res.status(200).json(data || { stocks: [], dividends: [] });
+        return res.status(200).json(normalizePortfolioData(data));
       } catch (err) {
-        return res.status(200).json({ stocks: [], dividends: [] });
+        return res.status(200).json(normalizePortfolioData(null));
       }
     } 
     
@@ -61,10 +105,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      const cleanedData = {
-        stocks: Array.isArray(payload.stocks) ? payload.stocks : [],
-        dividends: Array.isArray(payload.dividends) ? payload.dividends : []
-      };
+      const cleanedData = normalizePortfolioData(payload);
       
       await collection.updateOne(
         { _id: 'master_portfolio' },
