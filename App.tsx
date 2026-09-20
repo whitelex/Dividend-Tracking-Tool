@@ -76,6 +76,24 @@ type DividendForecast = {
   projectedPayments: Array<{ date: string; amount: number }>;
 };
 
+type StockMetrics = Stock & {
+  account: BrokerAccount | null;
+  totalShares: number;
+  avgPrice: number;
+  investedCapital: number;
+  marketValue: number;
+  gainLoss: number;
+  gainLossPercent: number;
+  stockDividends: number;
+  annualYoC: ReturnType<typeof getAnnualYoCHelper>;
+  yieldOnCost: number;
+  isClosed: boolean;
+  realizedProceeds: number;
+  purchaseCount: number;
+  sellCount: number;
+  lastTransactionDate: string | null;
+};
+
 const parseDate = (value: string) => new Date(`${value}T12:00:00Z`);
 
 const diffDays = (left: string, right: string) => (
@@ -98,6 +116,98 @@ const inferPayoutFrequency = (averageDays: number) => {
   if (averageDays <= 135) return 4;
   if (averageDays <= 240) return 2;
   return 1;
+};
+
+function getAnnualYoCHelper(stock: Stock, dividends: Dividend[]) {
+  const years = Array.from(new Set([
+    ...stock.purchases.map(purchase => new Date(purchase.date).getFullYear()),
+    ...dividends.filter(dividend => dividend.stockId === stock.id).map(dividend => new Date(dividend.date).getFullYear()),
+  ])).sort();
+
+  if (years.length === 0) return [];
+
+  const minYear = Math.min(...years);
+  const maxYear = new Date().getFullYear();
+  const result = [];
+
+  for (let year = minYear; year <= maxYear; year += 1) {
+    const invested = stock.purchases
+      .filter(purchase => (!purchase.type || purchase.type === 'buy') && new Date(purchase.date).getFullYear() <= year)
+      .reduce((sum, purchase) => sum + purchase.shares * purchase.price, 0);
+
+    const yearDividends = dividends
+      .filter(dividend => dividend.stockId === stock.id && new Date(dividend.date).getFullYear() === year)
+      .reduce((sum, dividend) => sum + dividend.amount, 0);
+
+    const cumulativeDividends = dividends
+      .filter(dividend => dividend.stockId === stock.id && new Date(dividend.date).getFullYear() <= year)
+      .reduce((sum, dividend) => sum + dividend.amount, 0);
+
+    result.push({
+      year,
+      invested,
+      divs: yearDividends,
+      cumDivs: cumulativeDividends,
+      yoc: invested > 0 ? (cumulativeDividends / invested) * 100 : 0,
+      yocYear: invested > 0 ? (yearDividends / invested) * 100 : 0,
+    });
+  }
+
+  return result;
+}
+
+const summarizeStockMetrics = (stock: Stock, dividends: Dividend[], account: BrokerAccount | null): StockMetrics => {
+  const orderedPurchases = stock.purchases.slice().sort((left, right) => left.date.localeCompare(right.date));
+  let remainingShares = 0;
+  let remainingCostBasis = 0;
+  let realizedProceeds = 0;
+
+  orderedPurchases.forEach(purchase => {
+    if (purchase.type === 'sell') {
+      const sharesSold = Math.min(purchase.shares, remainingShares);
+      const averageCost = remainingShares > 0 ? remainingCostBasis / remainingShares : 0;
+      remainingShares -= sharesSold;
+      remainingCostBasis -= averageCost * sharesSold;
+      realizedProceeds += sharesSold * purchase.price;
+      return;
+    }
+
+    remainingShares += purchase.shares;
+    remainingCostBasis += purchase.shares * purchase.price;
+  });
+
+  const totalShares = clamp(remainingShares, 0, Number.MAX_SAFE_INTEGER);
+  const investedCapital = clamp(remainingCostBasis, 0, Number.MAX_SAFE_INTEGER);
+  const avgPrice = totalShares > 0 ? investedCapital / totalShares : 0;
+  const stockDividends = dividends
+    .filter(dividend => dividend.stockId === stock.id)
+    .reduce((sum, dividend) => sum + dividend.amount, 0);
+  const annualYoC = getAnnualYoCHelper(stock, dividends);
+  const marketValue = stock.currentPrice ? totalShares * stock.currentPrice : investedCapital;
+  const gainLoss = marketValue - investedCapital;
+  const gainLossPercent = investedCapital > 0 ? (gainLoss / investedCapital) * 100 : 0;
+  const purchaseCount = orderedPurchases.filter(purchase => purchase.type !== 'sell').length;
+  const sellCount = orderedPurchases.filter(purchase => purchase.type === 'sell').length;
+  const lastTransactionDate = orderedPurchases[orderedPurchases.length - 1]?.date || null;
+
+  return {
+    ...stock,
+    account,
+    totalShares,
+    avgPrice,
+    investedCapital,
+    marketValue,
+    gainLoss,
+    gainLossPercent,
+    stockDividends,
+    annualYoC,
+    yieldOnCost: investedCapital > 0 ? (stockDividends / investedCapital) * 100 : 0,
+    isClosed: totalShares <= 0.000001,
+    realizedProceeds,
+    purchaseCount,
+    sellCount,
+    lastTransactionDate,
+  };
 };
 
 const buildDividendForecast = (stock: Stock, dividends: Dividend[]): DividendForecast | null => {
@@ -190,6 +300,7 @@ const createBlankPurchaseForm = (accountId: string) => ({
   price: 0,
   date: new Date().toISOString().split('T')[0],
   accountId,
+  transactionType: 'buy' as Purchase['type'],
 });
 
 const createBlankDividendForm = (stockId = '') => ({
@@ -353,6 +464,7 @@ const App: React.FC = () => {
   } | null>(null);
   const [transferTargets, setTransferTargets] = useState<Record<string, string>>({});
   const [allocationMode, setAllocationMode] = useState<'stock' | 'broker'>('stock');
+  const [showClosedPositions, setShowClosedPositions] = useState(false);
 
   const saveTimeoutRef = useRef<number | null>(null);
 
@@ -466,91 +578,33 @@ const App: React.FC = () => {
     [activeAccountId, portfolio.dividends]
   );
 
-  const dividendStockOptions = useMemo(
-    () => visibleStocks.slice().sort((left, right) => left.ticker.localeCompare(right.ticker)),
-    [visibleStocks]
-  );
-
-  function getAnnualYoC(stock: Stock, dividends: Dividend[]) {
-    const years = Array.from(new Set([
-      ...stock.purchases.map(purchase => new Date(purchase.date).getFullYear()),
-      ...dividends.filter(dividend => dividend.stockId === stock.id).map(dividend => new Date(dividend.date).getFullYear()),
-    ])).sort();
-
-    if (years.length === 0) return [];
-
-    const minYear = Math.min(...years);
-    const maxYear = new Date().getFullYear();
-    const result = [];
-
-    for (let year = minYear; year <= maxYear; year += 1) {
-      const invested = stock.purchases
-        .filter(purchase => (!purchase.type || purchase.type === 'buy') && new Date(purchase.date).getFullYear() <= year)
-        .reduce((sum, purchase) => sum + purchase.shares * purchase.price, 0);
-
-      const yearDividends = dividends
-        .filter(dividend => dividend.stockId === stock.id && new Date(dividend.date).getFullYear() === year)
-        .reduce((sum, dividend) => sum + dividend.amount, 0);
-
-      const cumulativeDividends = dividends
-        .filter(dividend => dividend.stockId === stock.id && new Date(dividend.date).getFullYear() <= year)
-        .reduce((sum, dividend) => sum + dividend.amount, 0);
-
-      result.push({
-        year,
-        invested,
-        divs: yearDividends,
-        cumDivs: cumulativeDividends,
-        yoc: invested > 0 ? (cumulativeDividends / invested) * 100 : 0,
-        yocYear: invested > 0 ? (yearDividends / invested) * 100 : 0,
-      });
-    }
-
-    return result;
-  }
-
   const stockStats = useMemo(() => (
-    visibleStocks.map(stock => {
-      const totalShares = stock.purchases.reduce((sum, purchase) => sum + purchase.shares, 0);
-      const totalCost = stock.purchases.reduce((sum, purchase) => sum + purchase.shares * purchase.price, 0);
-      const investedCapital = stock.purchases
-        .filter(purchase => !purchase.type || purchase.type === 'buy')
-        .reduce((sum, purchase) => sum + purchase.shares * purchase.price, 0);
-      const avgPrice = totalShares > 0 ? totalCost / totalShares : 0;
-      const stockDividends = visibleDividends
-        .filter(dividend => dividend.stockId === stock.id)
-        .reduce((sum, dividend) => sum + dividend.amount, 0);
-      const annualYoC = getAnnualYoC(stock, visibleDividends);
-      const marketValue = stock.currentPrice ? totalShares * stock.currentPrice : totalCost;
-      const gainLoss = marketValue - totalCost;
-      const gainLossPercent = totalCost > 0 ? (gainLoss / totalCost) * 100 : 0;
-      const account = accountMap.get(stock.accountId) || null;
-
-      return {
-        ...stock,
-        account,
-        totalShares,
-        totalCost,
-        investedCapital,
-        avgPrice,
-        stockDividends,
-        annualYoC,
-        marketValue,
-        gainLoss,
-        gainLossPercent,
-        yieldOnCost: investedCapital > 0 ? (stockDividends / investedCapital) * 100 : 0,
-      };
-    })
+    visibleStocks.map(stock => summarizeStockMetrics(stock, visibleDividends, accountMap.get(stock.accountId) || null))
   ), [accountMap, visibleDividends, visibleStocks]);
 
-  const totalPortfolioValue = useMemo(
-    () => stockStats.reduce((sum, stock) => sum + stock.marketValue, 0),
+  const openStockStats = useMemo(
+    () => stockStats.filter(stock => !stock.isClosed),
     [stockStats]
+  );
+
+  const closedStockStats = useMemo(
+    () => stockStats.filter(stock => stock.isClosed),
+    [stockStats]
+  );
+
+  const dividendStockOptions = useMemo(
+    () => openStockStats.slice().sort((left, right) => left.ticker.localeCompare(right.ticker)),
+    [openStockStats]
+  );
+
+  const totalPortfolioValue = useMemo(
+    () => openStockStats.reduce((sum, stock) => sum + stock.marketValue, 0),
+    [openStockStats]
   );
 
   const totalInvestedCapital = useMemo(
-    () => stockStats.reduce((sum, stock) => sum + stock.investedCapital, 0),
-    [stockStats]
+    () => openStockStats.reduce((sum, stock) => sum + stock.investedCapital, 0),
+    [openStockStats]
   );
 
   const totalDividends = useMemo(
@@ -559,12 +613,12 @@ const App: React.FC = () => {
   );
 
   const dividendForecasts = useMemo(() => {
-    const forecasts = visibleStocks
+    const forecasts = openStockStats
       .map(stock => buildDividendForecast(stock, visibleDividends))
       .filter((forecast): forecast is DividendForecast => forecast !== null);
 
     const eligibleStockIds = new Set(forecasts.map(forecast => forecast.stockId));
-    const insufficientHistoryCount = visibleStocks.filter(stock => !eligibleStockIds.has(stock.id)).length;
+    const insufficientHistoryCount = openStockStats.filter(stock => !eligibleStockIds.has(stock.id)).length;
     const weightedIncomeBase = forecasts.reduce((sum, forecast) => sum + forecast.annualizedIncome, 0);
     const weightedAverageGrowthRate = weightedIncomeBase > 0
       ? forecasts.reduce((sum, forecast) => sum + forecast.annualGrowthRate * forecast.annualizedIncome, 0) / weightedIncomeBase
@@ -577,14 +631,14 @@ const App: React.FC = () => {
       projectedAnnualIncome: forecasts.reduce((sum, forecast) => sum + forecast.projectedAnnualIncome, 0),
       averageGrowthRate: weightedAverageGrowthRate,
     };
-  }, [visibleDividends, visibleStocks]);
+  }, [openStockStats, visibleDividends]);
 
   const stockAllocationData: ChartData[] = useMemo(() => (
-    stockStats.map(stock => ({
+    openStockStats.map(stock => ({
       name: selectedAccount || !stock.account ? stock.ticker : `${stock.ticker} (${getAccountDisplayName(stock.account)})`,
       value: stock.marketValue,
     }))
-  ), [selectedAccount, stockStats]);
+  ), [openStockStats, selectedAccount]);
 
   const monthlyDividendData: DividendMonthData[] = useMemo(() => {
     const months: Record<string, { amount: number; projected: boolean }> = {};
@@ -626,21 +680,16 @@ const App: React.FC = () => {
     portfolio.brokerAccounts.map(account => {
       const stocks = portfolio.stocks.filter(stock => stock.accountId === account.id);
       const dividends = portfolio.dividends.filter(dividend => dividend.accountId === account.id);
-      const marketValue = stocks.reduce((sum, stock) => {
-        const shares = stock.purchases.reduce((shareSum, purchase) => shareSum + purchase.shares, 0);
-        const cost = stock.purchases.reduce((costSum, purchase) => costSum + purchase.shares * purchase.price, 0);
-        return sum + (stock.currentPrice ? shares * stock.currentPrice : cost);
-      }, 0);
-      const investedCapital = stocks.reduce((sum, stock) => (
-        sum + stock.purchases
-          .filter(purchase => !purchase.type || purchase.type === 'buy')
-          .reduce((purchaseSum, purchase) => purchaseSum + purchase.shares * purchase.price, 0)
-      ), 0);
+      const stockMetrics = stocks.map(stock => summarizeStockMetrics(stock, dividends, account));
+      const openMetrics = stockMetrics.filter(stock => !stock.isClosed);
+      const marketValue = openMetrics.reduce((sum, stock) => sum + stock.marketValue, 0);
+      const investedCapital = openMetrics.reduce((sum, stock) => sum + stock.investedCapital, 0);
       const totalDividendsForAccount = dividends.reduce((sum, dividend) => sum + dividend.amount, 0);
 
       return {
         account,
-        positions: stocks.length,
+        positions: openMetrics.length,
+        closedPositions: stockMetrics.length - openMetrics.length,
         marketValue,
         investedCapital,
         totalDividends: totalDividendsForAccount,
@@ -700,8 +749,27 @@ const App: React.FC = () => {
       shares: Number(newPurchase.shares),
       price: Number(newPurchase.price),
       date: newPurchase.date,
-      type: 'buy',
+      type: newPurchase.transactionType || 'buy',
     };
+
+    if (purchase.type === 'sell') {
+      if (existingStockIndex < 0) {
+        window.alert('You need an existing position before recording a sale.');
+        return;
+      }
+
+      const existingStock = portfolio.stocks[existingStockIndex];
+      const existingMetrics = summarizeStockMetrics(
+        existingStock,
+        portfolio.dividends.filter(dividend => dividend.stockId === existingStock.id),
+        accountMap.get(existingStock.accountId) || null
+      );
+
+      if (purchase.shares > existingMetrics.totalShares) {
+        window.alert(`You only have ${existingMetrics.totalShares.toFixed(4)} shares available to sell.`);
+        return;
+      }
+    }
 
     const newStocks = [...portfolio.stocks];
     if (existingStockIndex >= 0) {
@@ -971,7 +1039,7 @@ const App: React.FC = () => {
               onClick={openPurchaseModal}
               className="bg-white text-indigo-700 px-4 py-2.5 rounded-full font-black text-sm flex items-center shadow-sm hover:bg-indigo-50 transition-all active:scale-95 disabled:opacity-50"
             >
-              <Plus className="h-4 w-4 mr-2" /> ADD BUY
+              <Plus className="h-4 w-4 mr-2" /> ADD TRADE
             </button>
             <button
               disabled={syncStatus === 'loading' || dividendStockOptions.length === 0}
@@ -1250,7 +1318,16 @@ const App: React.FC = () => {
                   </p>
                 </div>
                 <div className="flex items-center gap-3 text-slate-400 text-xs font-black uppercase tracking-[0.18em]">
-                  <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-500 normal-case tracking-normal text-sm font-bold">{stockStats.length} Holdings</span>
+                  <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-500 normal-case tracking-normal text-sm font-bold">{openStockStats.length} Open</span>
+                  {closedStockStats.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowClosedPositions(current => !current)}
+                      className="px-3 py-1 rounded-full bg-slate-900 text-white normal-case tracking-normal text-sm font-bold"
+                    >
+                      {showClosedPositions ? 'Hide' : 'Show'} {closedStockStats.length} Closed
+                    </button>
+                  )}
                   <div className="flex items-center"><Calendar className="h-3 w-3 mr-1" /> {new Date().toLocaleDateString()}</div>
                 </div>
               </div>
@@ -1263,13 +1340,15 @@ const App: React.FC = () => {
                       {!selectedAccount && <th className="px-6 py-4">Broker Account</th>}
                       <th className="px-6 py-4 text-right">Shares</th>
                       <th className="px-6 py-4 text-right">Avg Cost</th>
+                      <th className="px-6 py-4 text-right">Price</th>
                       <th className="px-6 py-4 text-right">Total Invested</th>
+                      <th className="px-6 py-4 text-right">Market Value</th>
                       <th className="px-6 py-4 text-right">Yield on Cost</th>
                       <th className="px-6 py-4 text-center">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {stockStats.length > 0 ? stockStats.map(stock => (
+                    {openStockStats.length > 0 ? openStockStats.map(stock => (
                       <React.Fragment key={stock.id}>
                         <tr
                           className={`hover:bg-slate-50 transition-colors cursor-pointer ${expandedStockId === stock.id ? 'bg-indigo-50/30' : ''}`}
@@ -1298,7 +1377,9 @@ const App: React.FC = () => {
                           )}
                           <td className="px-6 py-5 text-right font-semibold text-slate-700">{stock.totalShares.toFixed(2)}</td>
                           <td className="px-6 py-5 text-right font-semibold text-slate-600">${stock.avgPrice.toFixed(2)}</td>
+                          <td className="px-6 py-5 text-right font-semibold text-slate-600">{stock.currentPrice ? `$${stock.currentPrice.toFixed(2)}` : '-'}</td>
                           <td className="px-6 py-5 text-right font-black text-slate-900">{formatCurrency(stock.investedCapital)}</td>
+                          <td className="px-6 py-5 text-right font-black text-slate-900">{formatCurrency(stock.marketValue)}</td>
                           <td className="px-6 py-5 text-right">
                             <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-black ${stock.yieldOnCost > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
                               {stock.yieldOnCost.toFixed(2)}%
@@ -1318,7 +1399,7 @@ const App: React.FC = () => {
                         </tr>
                         {expandedStockId === stock.id && (
                           <tr>
-                            <td colSpan={selectedAccount ? 7 : 8} className="px-6 py-4 bg-slate-50/50">
+                            <td colSpan={selectedAccount ? 9 : 10} className="px-6 py-4 bg-slate-50/50">
                               <div className="pl-10 space-y-5">
                                 {portfolio.brokerAccounts.length > 1 && (
                                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
@@ -1411,10 +1492,10 @@ const App: React.FC = () => {
                       </React.Fragment>
                     )) : (
                       <tr>
-                        <td colSpan={selectedAccount ? 7 : 8} className="px-6 py-20 text-center text-slate-300 italic">
+                        <td colSpan={selectedAccount ? 9 : 10} className="px-6 py-20 text-center text-slate-300 italic">
                           <Wallet className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                          <p className="text-lg">No holdings in this view yet.</p>
-                          <p className="text-sm">Click Add Purchase to track your next position.</p>
+                          <p className="text-lg">No open holdings in this view yet.</p>
+                          <p className="text-sm">Click Add Trade to track your next position.</p>
                         </td>
                       </tr>
                     )}
@@ -1422,6 +1503,34 @@ const App: React.FC = () => {
                 </table>
               </div>
             </div>
+
+            {showClosedPositions && closedStockStats.length > 0 && (
+              <div className="xl:col-span-2 bg-white rounded-[26px] shadow-sm border border-slate-200 p-6">
+                <div className="flex items-center justify-between mb-5 gap-3">
+                  <div>
+                    <h3 className="text-xl font-black text-slate-800">Closed Positions</h3>
+                    <p className="text-sm text-slate-400">Fully liquidated holdings stay archived here while active metrics only use remaining shares.</p>
+                  </div>
+                  <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-600 text-sm font-bold">{closedStockStats.length} closed</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {closedStockStats.map(stock => (
+                    <div key={stock.id} className="rounded-2xl border border-slate-200 p-4 bg-slate-50/60">
+                      <div className="flex items-center justify-between gap-3 mb-2">
+                        <p className="font-black text-slate-900 text-lg">{stock.ticker}</p>
+                        <span className="text-[10px] font-black uppercase tracking-[0.16em] px-2 py-1 rounded-full bg-slate-900 text-white">Closed</span>
+                      </div>
+                      <div className="space-y-1 text-sm text-slate-500">
+                        <p>Last activity: <span className="font-bold text-slate-700">{stock.lastTransactionDate || '-'}</span></p>
+                        <p>Realized proceeds: <span className="font-bold text-slate-700">{formatCurrency(stock.realizedProceeds)}</span></p>
+                        <p>Lifetime dividends: <span className="font-bold text-slate-700">{formatCurrency(stock.stockDividends)}</span></p>
+                        <p>Transactions: <span className="font-bold text-slate-700">{stock.purchaseCount} buys / {stock.sellCount} sells</span></p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {activeAccountId === ALL_ACCOUNTS_ID ? (
               <div className="bg-white rounded-[26px] shadow-sm border border-slate-200 p-6">
@@ -1510,12 +1619,24 @@ const App: React.FC = () => {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md animate-in zoom-in-95 duration-200 p-8">
             <div className="flex justify-between items-center mb-8">
-              <h3 className="text-2xl font-black text-slate-900">Add Purchase</h3>
+              <h3 className="text-2xl font-black text-slate-900">Add Trade</h3>
               <button onClick={() => setIsStockModalOpen(false)} className="bg-slate-100 p-2 rounded-full text-slate-400 hover:text-slate-600 transition-colors">
                 <Plus className="h-6 w-6 rotate-45" />
               </button>
             </div>
             <form onSubmit={handleAddPurchase} className="space-y-6">
+              <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Transaction Type</label>
+                <select
+                  required
+                  value={newPurchase.transactionType}
+                  onChange={e => setNewPurchase({ ...newPurchase, transactionType: e.target.value as Purchase['type'] })}
+                  className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900"
+                >
+                  <option value="buy">Buy</option>
+                  <option value="sell">Sell</option>
+                </select>
+              </div>
               <div>
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Broker Account</label>
                 <select
@@ -1568,7 +1689,7 @@ const App: React.FC = () => {
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Purchase Date</label>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">{newPurchase.transactionType === 'sell' ? 'Sale Date' : 'Trade Date'}</label>
                 <input
                   type="date"
                   required
@@ -1577,8 +1698,8 @@ const App: React.FC = () => {
                   className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-slate-900"
                 />
               </div>
-              <button type="submit" className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-xl active:scale-95 mt-4">
-                Record Purchase
+              <button type="submit" className={`w-full text-white py-5 rounded-2xl font-black text-sm uppercase tracking-widest transition-all shadow-xl active:scale-95 mt-4 ${newPurchase.transactionType === 'sell' ? 'bg-slate-900 hover:bg-slate-800' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
+                {newPurchase.transactionType === 'sell' ? 'Record Sale' : 'Record Purchase'}
               </button>
             </form>
           </div>

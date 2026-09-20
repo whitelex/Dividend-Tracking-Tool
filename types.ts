@@ -4,7 +4,7 @@ export interface Purchase {
   shares: number;
   price: number;
   date: string;
-  type?: 'buy' | 'drip'; // 'buy' = cash purchase, 'drip' = dividend reinvestment
+  type?: 'buy' | 'drip' | 'sell'; // 'buy' = cash purchase, 'drip' = dividend reinvestment, 'sell' = shares sold
 }
 
 export interface BrokerAccount {
