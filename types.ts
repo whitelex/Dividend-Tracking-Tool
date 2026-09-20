@@ -48,4 +48,5 @@ export interface ChartData {
 export interface DividendMonthData {
   month: string;
   amount: number;
+  projected?: boolean;
 }

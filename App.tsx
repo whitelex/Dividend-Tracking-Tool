@@ -60,8 +60,115 @@ const BROKER_INSTITUTIONS = ['Fidelity', 'Robinhood', 'Charles Schwab', 'Vanguar
 const ACCOUNT_TYPES = ['Taxable', 'Roth IRA', 'Traditional IRA', '401(k)', 'Cash', 'HSA', '529', 'Trust', 'Other'];
 const ALL_ACCOUNTS_ID = 'all-accounts';
 const LEGACY_ACCOUNT_ID = 'default-account';
+const MIN_DIVIDEND_HISTORY = 3;
+const FORECAST_MONTHS = 12;
+const DAY_IN_MS = 1000 * 60 * 60 * 24;
 
 const generateId = () => Math.random().toString(36).slice(2, 11);
+
+type DividendForecast = {
+  stockId: string;
+  ticker: string;
+  payoutsPerYear: number;
+  annualizedIncome: number;
+  annualGrowthRate: number;
+  projectedAnnualIncome: number;
+  projectedPayments: Array<{ date: string; amount: number }>;
+};
+
+const parseDate = (value: string) => new Date(`${value}T12:00:00Z`);
+
+const diffDays = (left: string, right: string) => (
+  (parseDate(right).getTime() - parseDate(left).getTime()) / DAY_IN_MS
+);
+
+const formatMonthKey = (value: string) => value.slice(0, 7);
+
+const formatDateKey = (date: Date) => date.toISOString().slice(0, 10);
+
+const addUtcMonths = (value: string, months: number) => {
+  const source = parseDate(value);
+  return new Date(Date.UTC(source.getUTCFullYear(), source.getUTCMonth() + months, source.getUTCDate(), 12));
+};
+
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const inferPayoutFrequency = (averageDays: number) => {
+  if (averageDays <= 45) return 12;
+  if (averageDays <= 135) return 4;
+  if (averageDays <= 240) return 2;
+  return 1;
+};
+
+const buildDividendForecast = (stock: Stock, dividends: Dividend[]): DividendForecast | null => {
+  const orderedDividends = dividends
+    .filter(dividend => dividend.stockId === stock.id)
+    .slice()
+    .sort((left, right) => left.date.localeCompare(right.date));
+
+  if (orderedDividends.length < MIN_DIVIDEND_HISTORY) {
+    return null;
+  }
+
+  const intervalDays = orderedDividends
+    .slice(1)
+    .map((dividend, index) => diffDays(orderedDividends[index].date, dividend.date))
+    .filter(days => Number.isFinite(days) && days > 0);
+
+  if (intervalDays.length === 0) {
+    return null;
+  }
+
+  const averageIntervalDays = intervalDays.reduce((sum, days) => sum + days, 0) / intervalDays.length;
+  const payoutsPerYear = inferPayoutFrequency(averageIntervalDays);
+  const intervalMonths = Math.max(1, Math.round(12 / payoutsPerYear));
+  const recentPayouts = orderedDividends.slice(-Math.min(payoutsPerYear, orderedDividends.length));
+  const averageRecentPayout = recentPayouts.reduce((sum, dividend) => sum + dividend.amount, 0) / recentPayouts.length;
+  const annualizedIncome = averageRecentPayout * payoutsPerYear;
+
+  const paymentGrowthRates = orderedDividends
+    .slice(1)
+    .map((dividend, index) => {
+      const previousAmount = orderedDividends[index].amount;
+      if (previousAmount <= 0) return null;
+      return clamp((dividend.amount - previousAmount) / previousAmount, -0.5, 0.5);
+    })
+    .filter((value): value is number => value !== null);
+
+  const averagePaymentGrowth = paymentGrowthRates.length > 0
+    ? paymentGrowthRates.reduce((sum, growth) => sum + growth, 0) / paymentGrowthRates.length
+    : 0;
+  const annualGrowthRate = clamp(Math.pow(1 + averagePaymentGrowth, payoutsPerYear) - 1, -0.5, 1);
+
+  const lastDividend = orderedDividends[orderedDividends.length - 1];
+  const projectedPayments: Array<{ date: string; amount: number }> = [];
+
+  for (let paymentIndex = 1; paymentIndex <= payoutsPerYear; paymentIndex += 1) {
+    const projectedDate = addUtcMonths(lastDividend.date, intervalMonths * paymentIndex);
+    const projectedAmount = clamp(lastDividend.amount * Math.pow(1 + averagePaymentGrowth, paymentIndex), 0, Number.MAX_SAFE_INTEGER);
+
+    projectedPayments.push({
+      date: formatDateKey(projectedDate),
+      amount: projectedAmount,
+    });
+
+    if (projectedPayments.length >= FORECAST_MONTHS) {
+      break;
+    }
+  }
+
+  const projectedAnnualIncome = projectedPayments.reduce((sum, payment) => sum + payment.amount, 0);
+
+  return {
+    stockId: stock.id,
+    ticker: stock.ticker,
+    payoutsPerYear,
+    annualizedIncome,
+    annualGrowthRate,
+    projectedAnnualIncome,
+    projectedPayments,
+  };
+};
 
 const createDefaultAccount = (): BrokerAccount => ({
   id: LEGACY_ACCOUNT_ID,
@@ -451,6 +558,27 @@ const App: React.FC = () => {
     [visibleDividends]
   );
 
+  const dividendForecasts = useMemo(() => {
+    const forecasts = visibleStocks
+      .map(stock => buildDividendForecast(stock, visibleDividends))
+      .filter((forecast): forecast is DividendForecast => forecast !== null);
+
+    const eligibleStockIds = new Set(forecasts.map(forecast => forecast.stockId));
+    const insufficientHistoryCount = visibleStocks.filter(stock => !eligibleStockIds.has(stock.id)).length;
+    const weightedIncomeBase = forecasts.reduce((sum, forecast) => sum + forecast.annualizedIncome, 0);
+    const weightedAverageGrowthRate = weightedIncomeBase > 0
+      ? forecasts.reduce((sum, forecast) => sum + forecast.annualGrowthRate * forecast.annualizedIncome, 0) / weightedIncomeBase
+      : 0;
+
+    return {
+      forecasts,
+      eligibleCount: forecasts.length,
+      insufficientHistoryCount,
+      projectedAnnualIncome: forecasts.reduce((sum, forecast) => sum + forecast.projectedAnnualIncome, 0),
+      averageGrowthRate: weightedAverageGrowthRate,
+    };
+  }, [visibleDividends, visibleStocks]);
+
   const stockAllocationData: ChartData[] = useMemo(() => (
     stockStats.map(stock => ({
       name: selectedAccount || !stock.account ? stock.ticker : `${stock.ticker} (${getAccountDisplayName(stock.account)})`,
@@ -459,16 +587,29 @@ const App: React.FC = () => {
   ), [selectedAccount, stockStats]);
 
   const monthlyDividendData: DividendMonthData[] = useMemo(() => {
-    const months: Record<string, number> = {};
+    const months: Record<string, { amount: number; projected: boolean }> = {};
     visibleDividends.forEach(dividend => {
-      const month = dividend.date.substring(0, 7);
-      months[month] = (months[month] || 0) + dividend.amount;
+      const month = formatMonthKey(dividend.date);
+      months[month] = {
+        amount: (months[month]?.amount || 0) + dividend.amount,
+        projected: false,
+      };
+    });
+
+    dividendForecasts.forecasts.forEach(forecast => {
+      forecast.projectedPayments.forEach(payment => {
+        const month = formatMonthKey(payment.date);
+        months[month] = {
+          amount: (months[month]?.amount || 0) + payment.amount,
+          projected: true,
+        };
+      });
     });
 
     return Object.entries(months)
       .sort((left, right) => left[0].localeCompare(right[0]))
-      .map(([month, amount]) => ({ month, amount }));
-  }, [visibleDividends]);
+      .map(([month, value]) => ({ month, amount: value.amount, projected: value.projected }));
+  }, [dividendForecasts, visibleDividends]);
 
   const recentDividends = useMemo(() => (
     visibleDividends
@@ -478,6 +619,8 @@ const App: React.FC = () => {
   ), [visibleDividends]);
 
   const totalPayouts = visibleDividends.length;
+  const projectedAnnualIncome = dividendForecasts.projectedAnnualIncome;
+  const averageDividendGrowthRate = dividendForecasts.averageGrowthRate;
 
   const accountSummaries = useMemo(() => (
     portfolio.brokerAccounts.map(account => {
@@ -940,7 +1083,7 @@ const App: React.FC = () => {
             </div>
           </section>
 
-          <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
             <div className="bg-white px-5 py-5 rounded-[24px] shadow-sm border border-slate-200">
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -976,11 +1119,33 @@ const App: React.FC = () => {
             <div className="bg-white px-5 py-5 rounded-[24px] shadow-sm border border-slate-200">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.16em] mb-2">Active Holdings</p>
-                  <p className="text-[2rem] leading-none font-black text-slate-900">{stockStats.length}</p>
-                  <p className="text-xs text-slate-400 mt-3">Across {selectedAccount ? getAccountDisplayName(selectedAccount) : 'all broker accounts'}</p>
+                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.16em] mb-2">Projected Next 12M</p>
+                  <p className="text-[2rem] leading-none font-black text-slate-900">
+                    {dividendForecasts.eligibleCount > 0 ? formatCurrency(projectedAnnualIncome) : 'N/A'}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-3">
+                    {dividendForecasts.eligibleCount > 0
+                      ? `${dividendForecasts.eligibleCount} holdings included`
+                      : 'Need at least 3 payouts per holding'}
+                  </p>
                 </div>
-                <div className="h-9 w-9 rounded-2xl bg-slate-100 text-slate-500 flex items-center justify-center"><Building2 className="h-4 w-4" /></div>
+                <div className="h-9 w-9 rounded-2xl bg-slate-100 text-slate-500 flex items-center justify-center"><Calendar className="h-4 w-4" /></div>
+              </div>
+            </div>
+            <div className="bg-white px-5 py-5 rounded-[24px] shadow-sm border border-slate-200">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.16em] mb-2">Avg Dividend Growth</p>
+                  <p className="text-[2rem] leading-none font-black text-slate-900">
+                    {dividendForecasts.eligibleCount > 0 ? `${(averageDividendGrowthRate * 100).toFixed(2)}%` : 'N/A'}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-3">
+                    {dividendForecasts.insufficientHistoryCount > 0
+                      ? `${dividendForecasts.insufficientHistoryCount} holdings need more history`
+                      : 'Based on historical payout growth'}
+                  </p>
+                </div>
+                <div className="h-9 w-9 rounded-2xl bg-slate-100 text-slate-500 flex items-center justify-center"><TrendingUp className="h-4 w-4" /></div>
               </div>
             </div>
           </section>
@@ -1038,10 +1203,13 @@ const App: React.FC = () => {
 
             <div className="bg-white p-6 rounded-[26px] shadow-sm border border-slate-200">
               <div className="flex items-center justify-between mb-6 gap-3">
-                <h2 className="text-lg font-bold text-slate-800 flex items-center">
-                  <History className="h-5 w-5 mr-2 text-indigo-500" />
-                  Dividend Income History
-                </h2>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800 flex items-center">
+                    <History className="h-5 w-5 mr-2 text-indigo-500" />
+                    Dividend Income History
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">Grey bars are projected from payout history and dividend growth.</p>
+                </div>
                 <span className="text-xs font-black text-slate-300">{totalPayouts} payouts</span>
               </div>
               <div className="h-64">
@@ -1050,8 +1218,15 @@ const App: React.FC = () => {
                     <BarChart data={monthlyDividendData} barCategoryGap="20%">
                       <XAxis dataKey="month" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
                       <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
-                      <Tooltip cursor={{ fill: '#f8fafc' }} formatter={(value: number) => `$${value.toFixed(2)}`} />
-                      <Bar dataKey="amount" fill="#4f46e5" radius={[8, 8, 0, 0]} />
+                      <Tooltip
+                        cursor={{ fill: '#f8fafc' }}
+                        formatter={(value: number, _name, item: any) => [`$${value.toFixed(2)}`, item?.payload?.projected ? 'Projected income' : 'Historical income']}
+                      />
+                      <Bar dataKey="amount" radius={[8, 8, 0, 0]}>
+                        {monthlyDividendData.map((entry, index) => (
+                          <Cell key={`${entry.month}-${index}`} fill={entry.projected ? '#94a3b8' : '#4f46e5'} fillOpacity={entry.projected ? 1 : 1} />
+                        ))}
+                      </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
