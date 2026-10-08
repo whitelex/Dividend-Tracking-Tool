@@ -46,6 +46,7 @@ import {
 } from 'recharts';
 import {
   BrokerAccount,
+  DismissedReminder,
   ChartData,
   Dividend,
   DividendMonthData,
@@ -64,16 +65,56 @@ const MIN_DIVIDEND_HISTORY = 3;
 const FORECAST_MONTHS = 12;
 const DAY_IN_MS = 1000 * 60 * 60 * 24;
 
+const PAYOUT_PATTERNS = [
+  { key: 'weekly', label: 'Weekly', payoutsPerYear: 52, typicalIntervalDays: 7, toleranceDays: 3, unit: 'days', step: 7 },
+  { key: 'biweekly', label: 'Biweekly', payoutsPerYear: 26, typicalIntervalDays: 14, toleranceDays: 4, unit: 'days', step: 14 },
+  { key: 'monthly', label: 'Monthly', payoutsPerYear: 12, typicalIntervalDays: 30, toleranceDays: 7, unit: 'months', step: 1 },
+  { key: 'quarterly', label: 'Quarterly', payoutsPerYear: 4, typicalIntervalDays: 91, toleranceDays: 18, unit: 'months', step: 3 },
+  { key: 'semiannual', label: 'Semiannual', payoutsPerYear: 2, typicalIntervalDays: 182, toleranceDays: 28, unit: 'months', step: 6 },
+  { key: 'annual', label: 'Annual', payoutsPerYear: 1, typicalIntervalDays: 365, toleranceDays: 35, unit: 'months', step: 12 },
+] as const;
+
+type PayoutPattern = typeof PAYOUT_PATTERNS[number];
+
 const generateId = () => Math.random().toString(36).slice(2, 11);
+
+const createMissingPayoutReminderId = (stockId: string, expectedDate: string) => `${stockId}:missing-payout:${expectedDate}`;
 
 type DividendForecast = {
   stockId: string;
   ticker: string;
+  frequencyLabel: string;
   payoutsPerYear: number;
+  cadenceConfidence: number;
+  cadenceIntervalDays: number;
+  cadenceToleranceDays: number;
   annualizedIncome: number;
   annualGrowthRate: number;
   projectedAnnualIncome: number;
+  nextExpectedDate: string;
+  nextEarliestDate: string;
+  nextLatestDate: string;
   projectedPayments: Array<{ date: string; amount: number }>;
+};
+
+type MissingPayoutReminder = {
+  id: string;
+  stockId: string;
+  ticker: string;
+  frequencyLabel: string;
+  expectedDate: string;
+  expectedWindowEnd: string;
+  estimatedAmount: number;
+  daysLate: number;
+};
+
+type UpcomingPayoutNotice = {
+  stockId: string;
+  ticker: string;
+  frequencyLabel: string;
+  expectedDate: string;
+  estimatedAmount: number;
+  daysUntil: number;
 };
 
 type StockMetrics = Stock & {
@@ -104,6 +145,8 @@ const formatMonthKey = (value: string) => value.slice(0, 7);
 
 const formatDateKey = (date: Date) => date.toISOString().slice(0, 10);
 
+const addUtcDays = (value: string, days: number) => new Date(parseDate(value).getTime() + (days * DAY_IN_MS));
+
 const addUtcMonths = (value: string, months: number) => {
   const source = parseDate(value);
   return new Date(Date.UTC(source.getUTCFullYear(), source.getUTCMonth() + months, source.getUTCDate(), 12));
@@ -111,11 +154,76 @@ const addUtcMonths = (value: string, months: number) => {
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+const getMedian = (values: number[]) => {
+  if (values.length === 0) return 0;
+
+  const ordered = values.slice().sort((left, right) => left - right);
+  const middleIndex = Math.floor(ordered.length / 2);
+
+  return ordered.length % 2 === 0
+    ? (ordered[middleIndex - 1] + ordered[middleIndex]) / 2
+    : ordered[middleIndex];
+};
+
 const inferPayoutFrequency = (averageDays: number) => {
+  if (averageDays <= 10) return 52;
+  if (averageDays <= 24) return 26;
   if (averageDays <= 45) return 12;
   if (averageDays <= 135) return 4;
   if (averageDays <= 240) return 2;
   return 1;
+};
+
+const getPatternByPayoutsPerYear = (payoutsPerYear: number) => (
+  PAYOUT_PATTERNS.find(pattern => pattern.payoutsPerYear === payoutsPerYear) || PAYOUT_PATTERNS[2]
+);
+
+const detectPayoutPattern = (intervalDays: number[]) => {
+  if (intervalDays.length === 0) {
+    return null;
+  }
+
+  const medianIntervalDays = getMedian(intervalDays);
+  const averageIntervalDays = intervalDays.reduce((sum, days) => sum + days, 0) / intervalDays.length;
+
+  const scoredPatterns = PAYOUT_PATTERNS.map(pattern => {
+    const matchCount = intervalDays.filter(days => Math.abs(days - pattern.typicalIntervalDays) <= pattern.toleranceDays).length;
+    const matchRatio = matchCount / intervalDays.length;
+    const medianDistance = Math.abs(medianIntervalDays - pattern.typicalIntervalDays);
+    const closeness = 1 - Math.min(medianDistance / Math.max(pattern.typicalIntervalDays, 1), 1);
+    const score = (matchRatio * 0.8) + (closeness * 0.2);
+
+    return {
+      pattern,
+      score,
+      matchCount,
+      intervalDays: clamp(
+        Math.round(medianIntervalDays),
+        Math.max(1, pattern.typicalIntervalDays - pattern.toleranceDays),
+        pattern.typicalIntervalDays + pattern.toleranceDays
+      ),
+    };
+  }).sort((left, right) => right.score - left.score);
+
+  const bestMatch = scoredPatterns[0];
+  if (bestMatch && bestMatch.score >= 0.55 && bestMatch.matchCount >= Math.max(1, Math.ceil(intervalDays.length / 2))) {
+    return {
+      pattern: bestMatch.pattern,
+      confidence: bestMatch.score,
+      intervalDays: bestMatch.intervalDays,
+    };
+  }
+
+  const fallbackPattern = getPatternByPayoutsPerYear(inferPayoutFrequency(averageIntervalDays));
+  return {
+    pattern: fallbackPattern,
+    confidence: clamp(bestMatch?.score ?? 0.4, 0.3, 0.54),
+    intervalDays: clamp(
+      Math.round(medianIntervalDays || averageIntervalDays || fallbackPattern.typicalIntervalDays),
+      Math.max(1, fallbackPattern.typicalIntervalDays - fallbackPattern.toleranceDays),
+      fallbackPattern.typicalIntervalDays + fallbackPattern.toleranceDays
+    ),
+  };
 };
 
 function getAnnualYoCHelper(stock: Stock, dividends: Dividend[]) {
@@ -229,9 +337,13 @@ const buildDividendForecast = (stock: Stock, dividends: Dividend[]): DividendFor
     return null;
   }
 
-  const averageIntervalDays = intervalDays.reduce((sum, days) => sum + days, 0) / intervalDays.length;
-  const payoutsPerYear = inferPayoutFrequency(averageIntervalDays);
-  const intervalMonths = Math.max(1, Math.round(12 / payoutsPerYear));
+  const cadence = detectPayoutPattern(intervalDays);
+  if (!cadence) {
+    return null;
+  }
+
+  const { pattern, confidence, intervalDays: cadenceIntervalDays } = cadence;
+  const payoutsPerYear = pattern.payoutsPerYear;
   const recentPayouts = orderedDividends.slice(-Math.min(payoutsPerYear, orderedDividends.length));
   const averageRecentPayout = recentPayouts.reduce((sum, dividend) => sum + dividend.amount, 0) / recentPayouts.length;
   const annualizedIncome = averageRecentPayout * payoutsPerYear;
@@ -252,19 +364,30 @@ const buildDividendForecast = (stock: Stock, dividends: Dividend[]): DividendFor
 
   const lastDividend = orderedDividends[orderedDividends.length - 1];
   const projectedPayments: Array<{ date: string; amount: number }> = [];
+  const nextExpectedDate = formatDateKey(
+    pattern.unit === 'days'
+      ? addUtcDays(lastDividend.date, cadenceIntervalDays)
+      : addUtcMonths(lastDividend.date, pattern.step)
+  );
+  const nextEarliestDate = formatDateKey(addUtcDays(nextExpectedDate, -pattern.toleranceDays));
+  const nextLatestDate = formatDateKey(addUtcDays(nextExpectedDate, pattern.toleranceDays));
+  const forecastEndDate = addUtcMonths(lastDividend.date, FORECAST_MONTHS);
 
-  for (let paymentIndex = 1; paymentIndex <= payoutsPerYear; paymentIndex += 1) {
-    const projectedDate = addUtcMonths(lastDividend.date, intervalMonths * paymentIndex);
+  for (let paymentIndex = 1; paymentIndex <= payoutsPerYear + 2; paymentIndex += 1) {
+    const projectedDate = pattern.unit === 'days'
+      ? addUtcDays(lastDividend.date, cadenceIntervalDays * paymentIndex)
+      : addUtcMonths(lastDividend.date, pattern.step * paymentIndex);
+
+    if (projectedDate.getTime() > forecastEndDate.getTime()) {
+      break;
+    }
+
     const projectedAmount = clamp(lastDividend.amount * Math.pow(1 + averagePaymentGrowth, paymentIndex), 0, Number.MAX_SAFE_INTEGER);
 
     projectedPayments.push({
       date: formatDateKey(projectedDate),
       amount: projectedAmount,
     });
-
-    if (projectedPayments.length >= FORECAST_MONTHS) {
-      break;
-    }
   }
 
   const projectedAnnualIncome = projectedPayments.reduce((sum, payment) => sum + payment.amount, 0);
@@ -272,10 +395,17 @@ const buildDividendForecast = (stock: Stock, dividends: Dividend[]): DividendFor
   return {
     stockId: stock.id,
     ticker: stock.ticker,
+    frequencyLabel: pattern.label,
     payoutsPerYear,
+    cadenceConfidence: confidence,
+    cadenceIntervalDays,
+    cadenceToleranceDays: pattern.toleranceDays,
     annualizedIncome,
     annualGrowthRate,
     projectedAnnualIncome,
+    nextExpectedDate,
+    nextEarliestDate,
+    nextLatestDate,
     projectedPayments,
   };
 };
@@ -292,6 +422,7 @@ const createEmptyPortfolio = (): PortfolioState => ({
   brokerAccounts: [createDefaultAccount()],
   stocks: [],
   dividends: [],
+  dismissedReminders: [],
 });
 
 const createBlankPurchaseForm = (accountId: string) => ({
@@ -366,18 +497,33 @@ const normalizePortfolioData = (payload: any): PortfolioState => {
       }))
     : [];
 
-  return { brokerAccounts, stocks, dividends };
+  const dismissedReminders: DismissedReminder[] = Array.isArray(payload?.dismissedReminders)
+    ? payload.dismissedReminders
+        .filter((reminder: any) => reminder && typeof reminder === 'object')
+        .map((reminder: any) => ({
+          id: reminder?.id || generateId(),
+          stockId: reminder?.stockId || '',
+          ticker: (reminder?.ticker || '').toUpperCase(),
+          reminderType: reminder?.reminderType === 'missing-payout' ? reminder.reminderType : 'missing-payout',
+          expectedDate: reminder?.expectedDate || '',
+          dismissedAt: reminder?.dismissedAt || new Date().toISOString(),
+        }))
+        .filter(reminder => reminder.stockId && reminder.expectedDate)
+    : [];
+
+  return { brokerAccounts, stocks, dividends, dismissedReminders };
 };
 
 const moveStockToAccount = (
   stocks: Stock[],
   dividends: Dividend[],
+  dismissedReminders: DismissedReminder[],
   stockId: string,
   targetAccountId: string
 ) => {
   const movingStock = stocks.find(stock => stock.id === stockId);
   if (!movingStock) {
-    return { stocks, dividends };
+    return { stocks, dividends, dismissedReminders };
   }
 
   const existingTargetStock = stocks.find(
@@ -392,6 +538,7 @@ const moveStockToAccount = (
       dividends: dividends.map(dividend => (
         dividend.stockId === stockId ? { ...dividend, accountId: targetAccountId } : dividend
       )),
+      dismissedReminders,
     };
   }
 
@@ -414,20 +561,26 @@ const moveStockToAccount = (
         ? { ...dividend, stockId: existingTargetStock.id, accountId: targetAccountId }
         : dividend
     )),
+    dismissedReminders: dismissedReminders.map(reminder => (
+      reminder.stockId === stockId
+        ? { ...reminder, stockId: existingTargetStock.id }
+        : reminder
+    )),
   };
 };
 
 const reassignAccountHoldings = (
   stocks: Stock[],
   dividends: Dividend[],
+  dismissedReminders: DismissedReminder[],
   fromAccountId: string,
   targetAccountId: string
 ) => {
   const stockIdsToMove = stocks.filter(stock => stock.accountId === fromAccountId).map(stock => stock.id);
 
   return stockIdsToMove.reduce(
-    (current, stockId) => moveStockToAccount(current.stocks, current.dividends, stockId, targetAccountId),
-    { stocks, dividends }
+    (current, stockId) => moveStockToAccount(current.stocks, current.dividends, current.dismissedReminders, stockId, targetAccountId),
+    { stocks, dividends, dismissedReminders }
   );
 };
 
@@ -676,6 +829,82 @@ const App: React.FC = () => {
   const projectedAnnualIncome = dividendForecasts.projectedAnnualIncome;
   const averageDividendGrowthRate = dividendForecasts.averageGrowthRate;
 
+  const payoutSignals = useMemo(() => {
+    const todayKey = formatDateKey(new Date());
+    const today = parseDate(todayKey);
+    const dismissedReminderIds = new Set(portfolio.dismissedReminders.map(reminder => reminder.id));
+    const missingReminders: MissingPayoutReminder[] = [];
+    const upcomingNotices: UpcomingPayoutNotice[] = [];
+
+    dividendForecasts.forecasts.forEach(forecast => {
+      if (forecast.cadenceConfidence < 0.6) {
+        return;
+      }
+
+      const expectedDate = parseDate(forecast.nextExpectedDate);
+      const latestDate = parseDate(forecast.nextLatestDate);
+      const graceDays = Math.max(1, Math.ceil(forecast.cadenceToleranceDays / 2));
+      const reminderId = createMissingPayoutReminderId(forecast.stockId, forecast.nextExpectedDate);
+      const reminderThreshold = latestDate.getTime() + (graceDays * DAY_IN_MS);
+      const estimatedAmount = forecast.projectedPayments[0]?.amount || 0;
+
+      if (today.getTime() > reminderThreshold && !dismissedReminderIds.has(reminderId)) {
+        missingReminders.push({
+          id: reminderId,
+          stockId: forecast.stockId,
+          ticker: forecast.ticker,
+          frequencyLabel: forecast.frequencyLabel,
+          expectedDate: forecast.nextExpectedDate,
+          expectedWindowEnd: forecast.nextLatestDate,
+          estimatedAmount,
+          daysLate: Math.ceil((today.getTime() - reminderThreshold) / DAY_IN_MS),
+        });
+        return;
+      }
+
+      const lookaheadDays = Math.min(Math.max(Math.round(forecast.cadenceIntervalDays * 1.5), 7), 21);
+      const daysUntilExpected = Math.ceil((expectedDate.getTime() - today.getTime()) / DAY_IN_MS);
+      if (daysUntilExpected >= 0 && daysUntilExpected <= lookaheadDays) {
+        upcomingNotices.push({
+          stockId: forecast.stockId,
+          ticker: forecast.ticker,
+          frequencyLabel: forecast.frequencyLabel,
+          expectedDate: forecast.nextExpectedDate,
+          estimatedAmount,
+          daysUntil: daysUntilExpected,
+        });
+      }
+    });
+
+    return {
+      missingReminders: missingReminders.sort((left, right) => right.daysLate - left.daysLate),
+      upcomingNotices: upcomingNotices.sort((left, right) => left.daysUntil - right.daysUntil).slice(0, 4),
+    };
+  }, [dividendForecasts, portfolio.dismissedReminders]);
+
+  const dismissMissingPayoutReminder = (reminder: MissingPayoutReminder) => {
+    setPortfolio(prev => {
+      if (prev.dismissedReminders.some(entry => entry.id === reminder.id)) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        dismissedReminders: [
+          ...prev.dismissedReminders,
+          {
+            id: reminder.id,
+            stockId: reminder.stockId,
+            ticker: reminder.ticker,
+            reminderType: 'missing-payout',
+            expectedDate: reminder.expectedDate,
+            dismissedAt: new Date().toISOString(),
+          },
+        ],
+      };
+    });
+  };
+
   const accountSummaries = useMemo(() => (
     portfolio.brokerAccounts.map(account => {
       const stocks = portfolio.stocks.filter(stock => stock.accountId === account.id);
@@ -834,6 +1063,9 @@ const App: React.FC = () => {
     setPortfolio(prev => ({
       ...prev,
       stocks: newStocks,
+      dismissedReminders: prev.dismissedReminders.filter(reminder => !(
+        reminder.stockId === newDiv.stockId && reminder.expectedDate <= newDiv.date
+      )),
       dividends: [...prev.dividends, dividend],
     }));
     setIsDivModalOpen(false);
@@ -882,6 +1114,7 @@ const App: React.FC = () => {
       ...prev,
       stocks: prev.stocks.filter(stock => stock.id !== stockId),
       dividends: prev.dividends.filter(dividend => dividend.stockId !== stockId),
+      dismissedReminders: prev.dismissedReminders.filter(reminder => reminder.stockId !== stockId),
     }));
     setExpandedStockId(current => (current === stockId ? null : current));
   };
@@ -905,6 +1138,9 @@ const App: React.FC = () => {
         ...prev,
         stocks: updatedStocks,
         dividends: updatedDividends,
+        dismissedReminders: stockStillExists
+          ? prev.dismissedReminders
+          : prev.dismissedReminders.filter(reminder => reminder.stockId !== stockId),
       };
     });
   };
@@ -914,11 +1150,12 @@ const App: React.FC = () => {
     if (!targetAccountId) return;
 
     setPortfolio(prev => {
-      const moved = moveStockToAccount(prev.stocks, prev.dividends, stockId, targetAccountId);
+      const moved = moveStockToAccount(prev.stocks, prev.dividends, prev.dismissedReminders, stockId, targetAccountId);
       return {
         ...prev,
         stocks: moved.stocks,
         dividends: moved.dividends,
+        dismissedReminders: moved.dismissedReminders,
       };
     });
     setTransferTargets(prev => {
@@ -936,11 +1173,13 @@ const App: React.FC = () => {
     if (mode === 'reassign' && !reassignToId) return;
 
     setPortfolio(prev => {
+      const removedStockIds = new Set(prev.stocks.filter(stock => stock.accountId === accountId).map(stock => stock.id));
       const reassigned = mode === 'reassign'
-        ? reassignAccountHoldings(prev.stocks, prev.dividends, accountId, reassignToId)
+        ? reassignAccountHoldings(prev.stocks, prev.dividends, prev.dismissedReminders, accountId, reassignToId)
         : {
             stocks: prev.stocks.filter(stock => stock.accountId !== accountId),
             dividends: prev.dividends.filter(dividend => dividend.accountId !== accountId),
+            dismissedReminders: prev.dismissedReminders.filter(reminder => !removedStockIds.has(reminder.stockId)),
           };
 
       return {
@@ -948,6 +1187,7 @@ const App: React.FC = () => {
         brokerAccounts: prev.brokerAccounts.filter(account => account.id !== accountId),
         stocks: reassigned.stocks,
         dividends: reassigned.dividends,
+        dismissedReminders: reassigned.dismissedReminders,
       };
     });
 
@@ -1059,6 +1299,57 @@ const App: React.FC = () => {
         </div>
       ) : (
         <main className="max-w-7xl mx-auto px-3 sm:px-6 mt-4 animate-in fade-in duration-700 space-y-5">
+          {(payoutSignals.missingReminders.length > 0 || payoutSignals.upcomingNotices.length > 0) && (
+            <section className="space-y-3">
+              {payoutSignals.missingReminders.map(reminder => (
+                <div key={reminder.id} className="bg-amber-50 border border-amber-200 rounded-[24px] px-5 py-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[11px] font-black uppercase tracking-[0.16em] text-amber-600 mb-1">Missing payout reminder</p>
+                      <p className="text-base font-black text-slate-900">Did you miss the last payout entry for {reminder.ticker}?</p>
+                      <p className="text-sm text-slate-600 mt-1">
+                        Expected around {reminder.expectedDate} from a {reminder.frequencyLabel.toLowerCase()} pattern.
+                        {reminder.estimatedAmount > 0 ? ` Estimated payout ${formatCurrency(reminder.estimatedAmount)}.` : ''}
+                        {` ${reminder.daysLate} day${reminder.daysLate === 1 ? '' : 's'} late past the reminder window.`}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => dismissMissingPayoutReminder(reminder)}
+                      className="shrink-0 h-9 w-9 rounded-full bg-white text-slate-400 hover:text-slate-700 border border-amber-200 flex items-center justify-center transition-colors"
+                      aria-label={`Dismiss reminder for ${reminder.ticker}`}
+                    >
+                      <Plus className="h-4 w-4 rotate-45" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {payoutSignals.upcomingNotices.length > 0 && (
+                <div className="bg-white rounded-[24px] border border-slate-200 shadow-sm px-5 py-4">
+                  <div className="flex items-start gap-3">
+                    <div className="h-10 w-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                      <Calendar className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-400 mb-1">Upcoming payout watchlist</p>
+                      <div className="flex flex-wrap gap-2">
+                        {payoutSignals.upcomingNotices.map(notice => (
+                          <span key={`${notice.stockId}:${notice.expectedDate}`} className="inline-flex flex-wrap items-center gap-1 rounded-full bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700">
+                            <span>{notice.ticker}</span>
+                            <span className="text-slate-400">{notice.daysUntil === 0 ? 'today' : `in ${notice.daysUntil} day${notice.daysUntil === 1 ? '' : 's'}`}</span>
+                            {notice.estimatedAmount > 0 && <span className="text-indigo-600">{formatCurrency(notice.estimatedAmount)}</span>}
+                            <span className="text-slate-400">{notice.frequencyLabel}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
           <section className="bg-white/90 backdrop-blur rounded-[24px] border border-slate-200 px-4 py-3 shadow-sm overflow-hidden">
             <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">

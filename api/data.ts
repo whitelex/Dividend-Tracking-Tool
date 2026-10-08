@@ -41,10 +41,25 @@ function normalizePortfolioData(payload: any) {
       }))
     : [];
 
+  const dismissedReminders = Array.isArray(payload?.dismissedReminders)
+    ? payload.dismissedReminders
+        .filter((reminder: any) => reminder && typeof reminder === 'object')
+        .map((reminder: any) => ({
+          id: reminder.id,
+          stockId: reminder.stockId || '',
+          ticker: typeof reminder.ticker === 'string' ? reminder.ticker.toUpperCase() : '',
+          reminderType: reminder.reminderType === 'missing-payout' ? reminder.reminderType : 'missing-payout',
+          expectedDate: reminder.expectedDate || '',
+          dismissedAt: reminder.dismissedAt || new Date().toISOString()
+        }))
+        .filter((reminder: any) => reminder.id && reminder.stockId && reminder.expectedDate)
+    : [];
+
   return {
     brokerAccounts,
     stocks,
-    dividends
+    dividends,
+    dismissedReminders
   };
 }
 

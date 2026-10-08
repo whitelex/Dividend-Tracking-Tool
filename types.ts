@@ -34,10 +34,20 @@ export interface Dividend {
   linkedPurchaseId?: string; // ID of the Purchase created from this dividend
 }
 
+export interface DismissedReminder {
+  id: string;
+  stockId: string;
+  ticker: string;
+  reminderType: 'missing-payout';
+  expectedDate: string;
+  dismissedAt: string;
+}
+
 export interface PortfolioState {
   brokerAccounts: BrokerAccount[];
   stocks: Stock[];
   dividends: Dividend[];
+  dismissedReminders: DismissedReminder[];
 }
 
 export interface ChartData {
