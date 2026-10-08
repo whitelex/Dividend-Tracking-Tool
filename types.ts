@@ -4,12 +4,21 @@ export interface Purchase {
   shares: number;
   price: number;
   date: string;
-  type?: 'buy' | 'drip'; // 'buy' = cash purchase, 'drip' = dividend reinvestment
+  type?: 'buy' | 'drip' | 'sell'; // 'buy' = cash purchase, 'drip' = dividend reinvestment, 'sell' = shares sold
+}
+
+export interface BrokerAccount {
+  id: string;
+  institution: string;
+  type: string;
+  color: string;
+  nickname: string;
 }
 
 export interface Stock {
   id: string;
   ticker: string;
+  accountId: string;
   purchases: Purchase[];
   currentPrice?: number; // Real-time market price
 }
@@ -17,6 +26,7 @@ export interface Stock {
 export interface Dividend {
   id: string;
   stockId: string;
+  accountId: string;
   ticker: string;
   amount: number;
   date: string;
@@ -24,9 +34,20 @@ export interface Dividend {
   linkedPurchaseId?: string; // ID of the Purchase created from this dividend
 }
 
+export interface DismissedReminder {
+  id: string;
+  stockId: string;
+  ticker: string;
+  reminderType: 'missing-payout';
+  expectedDate: string;
+  dismissedAt: string;
+}
+
 export interface PortfolioState {
+  brokerAccounts: BrokerAccount[];
   stocks: Stock[];
   dividends: Dividend[];
+  dismissedReminders: DismissedReminder[];
 }
 
 export interface ChartData {
@@ -37,4 +58,5 @@ export interface ChartData {
 export interface DividendMonthData {
   month: string;
   amount: number;
+  projected?: boolean;
 }
