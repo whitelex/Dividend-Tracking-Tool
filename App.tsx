@@ -318,7 +318,27 @@ const summarizeStockMetrics = (stock: Stock, dividends: Dividend[], account: Bro
   };
 };
 
-const buildDividendForecast = (stock: Stock, dividends: Dividend[]): DividendForecast | null => {
+const getSharesHeldOnDate = (stock: Stock, date: string, excludedPurchaseId?: string) => {
+  const orderedPurchases = stock.purchases.slice().sort((left, right) => left.date.localeCompare(right.date));
+  let sharesHeld = 0;
+
+  orderedPurchases.forEach(purchase => {
+    if (purchase.date > date || purchase.id === excludedPurchaseId) {
+      return;
+    }
+
+    if (purchase.type === 'sell') {
+      sharesHeld -= purchase.shares;
+      return;
+    }
+
+    sharesHeld += purchase.shares;
+  });
+
+  return clamp(sharesHeld, 0, Number.MAX_SAFE_INTEGER);
+};
+
+const buildDividendForecast = (stock: StockMetrics, dividends: Dividend[]): DividendForecast | null => {
   const orderedDividends = dividends
     .filter(dividend => dividend.stockId === stock.id)
     .slice()
@@ -337,6 +357,27 @@ const buildDividendForecast = (stock: Stock, dividends: Dividend[]): DividendFor
     return null;
   }
 
+  const payoutHistory = orderedDividends.map(dividend => {
+    const sharesHeld = getSharesHeldOnDate(stock, dividend.date, dividend.linkedPurchaseId);
+    if (sharesHeld <= 0) {
+      return null;
+    }
+
+    return {
+      dividend,
+      sharesHeld,
+      dividendPerShare: dividend.amount / sharesHeld,
+    };
+  }).filter((entry): entry is {
+    dividend: Dividend;
+    sharesHeld: number;
+    dividendPerShare: number;
+  } => entry !== null && Number.isFinite(entry.dividendPerShare) && entry.dividendPerShare > 0);
+
+  if (payoutHistory.length < MIN_DIVIDEND_HISTORY) {
+    return null;
+  }
+
   const cadence = detectPayoutPattern(intervalDays);
   if (!cadence) {
     return null;
@@ -344,16 +385,17 @@ const buildDividendForecast = (stock: Stock, dividends: Dividend[]): DividendFor
 
   const { pattern, confidence, intervalDays: cadenceIntervalDays } = cadence;
   const payoutsPerYear = pattern.payoutsPerYear;
-  const recentPayouts = orderedDividends.slice(-Math.min(payoutsPerYear, orderedDividends.length));
-  const averageRecentPayout = recentPayouts.reduce((sum, dividend) => sum + dividend.amount, 0) / recentPayouts.length;
-  const annualizedIncome = averageRecentPayout * payoutsPerYear;
+  const recentPayouts = payoutHistory.slice(-Math.min(payoutsPerYear, payoutHistory.length));
+  const averageRecentDividendPerShare = recentPayouts.reduce((sum, payout) => sum + payout.dividendPerShare, 0) / recentPayouts.length;
+  const latestDividendPerShare = payoutHistory[payoutHistory.length - 1].dividendPerShare;
+  const annualizedIncome = averageRecentDividendPerShare * stock.totalShares * payoutsPerYear;
 
-  const paymentGrowthRates = orderedDividends
+  const paymentGrowthRates = payoutHistory
     .slice(1)
-    .map((dividend, index) => {
-      const previousAmount = orderedDividends[index].amount;
+    .map((payout, index) => {
+      const previousAmount = payoutHistory[index].dividendPerShare;
       if (previousAmount <= 0) return null;
-      return clamp((dividend.amount - previousAmount) / previousAmount, -0.5, 0.5);
+      return clamp((payout.dividendPerShare - previousAmount) / previousAmount, -0.5, 0.5);
     })
     .filter((value): value is number => value !== null);
 
@@ -382,7 +424,12 @@ const buildDividendForecast = (stock: Stock, dividends: Dividend[]): DividendFor
       break;
     }
 
-    const projectedAmount = clamp(lastDividend.amount * Math.pow(1 + averagePaymentGrowth, paymentIndex), 0, Number.MAX_SAFE_INTEGER);
+    const projectedDividendPerShare = clamp(
+      latestDividendPerShare * Math.pow(1 + averagePaymentGrowth, paymentIndex),
+      0,
+      Number.MAX_SAFE_INTEGER
+    );
+    const projectedAmount = clamp(projectedDividendPerShare * stock.totalShares, 0, Number.MAX_SAFE_INTEGER);
 
     projectedPayments.push({
       date: formatDateKey(projectedDate),
